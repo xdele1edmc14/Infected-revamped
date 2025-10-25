@@ -1,0 +1,67 @@
+name: Infected
+version: '1.0-SNAPSHOT'
+main: me.DaWHeL.infected.InfectedPlugin
+api-version: '1.21'
+load: STARTUP
+authors: [ DaWHeL ]
+description: An infected minigame created for Outcraft
+commands:
+  startinfected:
+    description: Start the infected game
+    permission: infected.admin
+  togglezombie:
+    description: Toggle yourself between survivor/zombie
+    usage: /togglezombie <player>
+    permission: infected.admin
+  stopinfected:
+    description: Stop the infected game and reset players
+    permission: infected.admin
+  reloadinfected:
+    description: Reload the infected plugin configuration
+    permission: infected.admin
+  addteleport:
+    description: Add a teleport point for survivors or zombies
+    usage: /addteleport <pointName>
+    permission: infected.admin
+  removeteleport:
+    description: Remove a teleport point for survivors or zombies
+    usage: /removeteleport <pointName>
+    permission: infected.admin
+  tttp:
+    description: Teleport to a specific teleport point
+    usage: /tttp <pointName>
+    permission: infected.admin
+  removeplayer:
+    description: Remove a player from the survivors
+    usage: /removeplayer <player>
+    permission: infected.admin
+  listteleportpoints:
+    description: List all teleport points for survivors and zombies
+    permission: infected.admin
+  buffinfected:
+    description: Buffs all infected with Speed and a tracking compass.
+    permission: infected.admin
+  listplayers:
+    description: Lists all survivors and infected players.
+    permission: infected.admin
+  helpinfected:
+    description: Shows help for the Infected plugin
+    permission: infected.admin
+  createinfectedspawn:
+    permission: infected.admin
+    description: Sets the infected spawn location
+  tpinfectedspawn:
+    description: Teleports you to the infected spawn location
+    permission: infected.admin
+  givefeather:
+    description: Gives you a test Jump Feather.
+    permission: infected.admin
+
+
+permissions:
+  infected.admin:
+    description: Allows using all infected plugin admin commands
+    default: op
+
+
+

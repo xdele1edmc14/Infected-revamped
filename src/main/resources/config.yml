@@ -1,0 +1,38 @@
+# Infected Plugin Configuration
+
+settings:
+  starting-zombies: 5            # Number of zombies to infect at the start of the game
+  infected-teleport-delay: 10    # Seconds after all the survivals finished teleporting, to start teleporting the infected players
+
+  teleport-batch-size: 5         # Players teleported per teleport-delay to avoid lag
+  teleport-delay: 40             # Delay in TICKS between each teleport batch (20 ticks = 1 second)
+
+# Scoreboard configuration
+scoreboard:
+  title: "&a&lInfected Game"
+  lines:
+    - "&cInfected: &f{infected}"
+    - "&bSurvivors: &f{survivors}"
+    - ""
+    - "&7Have fun!"
+
+# Messages
+messages:
+  game-start: "&eThe Infected game has started with &c{zombies} &ezombies!"
+  game-stop: "The Infected game has been stopped!"
+  survivors-teleporting: "&bSurvivors are being teleported..."
+  zombies-teleporting: "&cInfected zombies will be teleported in &e{time} &cseconds..."
+  infected: "&c{player} has been infected!"
+  all-infected:
+    chat: "&4All survivors are infected! Zombies win!"
+    title: "&4Zombies Win!"
+    subtitle: "&7All survivors have been infected!"
+  all-survivals: "&4All zombies left the game! Restarting..."
+  already-running: "&cThe game is already running!"
+  config-reloaded: "&aInfected plugin configuration reloaded!"
+
+infected-spawn:
+
+# Teleport points for survivors & infected | Wouldn't recommend changing these unless you know what you're doing.
+# Use /addteleport and /removeteleport to modify these in-game.
+teleports:
