@@ -2,6 +2,7 @@
 
 settings:
   starting-zombies: 5            # Number of zombies to infect at the start of the game
+  infected-lives: 3              # Deaths an infected player can take before becoming a spectator
   infected-teleport-delay: 10    # Seconds after all the survivals finished teleporting, to start teleporting the infected players
 
   teleport-batch-size: 5         # Players teleported per teleport-delay to avoid lag
@@ -27,6 +28,10 @@ messages:
     chat: "&4All survivors are infected! Zombies win!"
     title: "&4Zombies Win!"
     subtitle: "&7All survivors have been infected!"
+  all-survivors:
+    chat: "&2All infected have been eliminated! Survivors win!"
+    title: "&2Survivors Win!"
+    subtitle: "&7All infected have been eliminated!"
   all-survivals: "&4All zombies left the game! Restarting..."
   already-running: "&cThe game is already running!"
   config-reloaded: "&aInfected plugin configuration reloaded!"

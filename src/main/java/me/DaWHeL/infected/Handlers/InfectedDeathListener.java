@@ -29,5 +29,7 @@ public class InfectedDeathListener implements Listener {
 
         // (Optional) remove XP drop too
         event.setDroppedExp(0);
+
+        gameManager.handleInfectedDeath(player);
     }
 }

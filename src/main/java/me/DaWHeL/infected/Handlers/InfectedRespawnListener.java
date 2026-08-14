@@ -2,6 +2,7 @@ package me.DaWHeL.infected.Handlers;
 
 import me.DaWHeL.infected.GameManager;
 import org.bukkit.Bukkit;
+import org.bukkit.GameMode;
 import org.bukkit.World;
 import org.bukkit.WorldBorder;
 import org.bukkit.ChatColor;
@@ -32,6 +33,15 @@ public class InfectedRespawnListener implements Listener {
 
         // only if the game is running
         if (!gameManager.isGameRunning()) return;
+
+        if (gameManager.isEliminatedInfected(player)) {
+            Bukkit.getScheduler().runTask(gameManager.getPlugin(), () -> {
+                if (gameManager.isGameRunning()) {
+                    player.setGameMode(GameMode.SPECTATOR);
+                }
+            });
+            return;
+        }
 
         // check if the player is an infected zombie
         boolean isInfected = gameManager.getInfected().stream()

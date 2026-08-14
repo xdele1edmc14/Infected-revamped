@@ -19,6 +19,7 @@ public class GameManager {
     private final InfectedPlugin plugin;
     private final List<Survivor> survivors = new ArrayList<>();
     private final List<Infected> infected = new ArrayList<>();
+    private final InfectedLifeTracker infectedLives = new InfectedLifeTracker();
     private final  ScoreboardManager scoreboardManager;
     private boolean gameRunning = false;
 
@@ -56,7 +57,9 @@ public class GameManager {
         survivors.add(survivor);
     }
     public void addInfected(Infected infectedPlayer) {
+        infected.removeIf(existing -> existing.getPlayer().equals(infectedPlayer.getPlayer()));
         infected.add(infectedPlayer);
+        infectedLives.register(infectedPlayer.getPlayer().getUniqueId(), getConfiguredInfectedLives());
     }
 
     public ScoreboardManager getScoreboardManager() {
@@ -69,6 +72,7 @@ public class GameManager {
     public void startGame() {
         gameRunning = true;
         infected.clear();
+        infectedLives.clear();
 
 
         int numToInfect = Math.min(
@@ -112,6 +116,7 @@ public class GameManager {
         if (!gameRunning) return;
 
         gameRunning = false;
+        infectedLives.clear();
         Bukkit.broadcastMessage(ChatColor.YELLOW + plugin.getConfig().getString("messages.game-stop", "The game has been stopped!"));
 
         // Get all online players
@@ -148,6 +153,7 @@ public class GameManager {
         if (player == null || !player.isOnline()) return;
 
         player.setGlowing(false);
+        player.setGameMode(org.bukkit.GameMode.SURVIVAL);
         survivors.add(new Survivor(player));
         player.teleport(player.getWorld().getSpawnLocation());
 
@@ -172,7 +178,7 @@ public class GameManager {
 
     public void infectPlayer(Player victim, boolean announce) {
         survivors.removeIf(s -> s.getPlayer().equals(victim));
-        infected.add(new Infected(plugin, victim, false));
+        addInfected(new Infected(plugin, victim, false));
 
         if (announce) {
             String msg = plugin.getConfig().getString("messages.infected", "&c{player} infected!");
@@ -192,29 +198,60 @@ public class GameManager {
 
         // Otherwise make them infected
         survivors.removeIf(s -> s.getPlayer().equals(player));
-        infected.add(new Infected(plugin, player, false));
+        addInfected(new Infected(plugin, player, false));
+    }
+
+    public boolean handleInfectedDeath(Player player) {
+        if (infected.stream().noneMatch(infectedPlayer -> infectedPlayer.getPlayer().equals(player))) {
+            return false;
+        }
+
+        boolean hasRemainingLife = infectedLives.consumeLife(player.getUniqueId());
+        if (!hasRemainingLife) {
+            infected.removeIf(infectedPlayer -> infectedPlayer.getPlayer().equals(player));
+            checkWin();
+        }
+        return hasRemainingLife;
+    }
+
+    public boolean isEliminatedInfected(Player player) {
+        return infectedLives.isEliminated(player.getUniqueId());
     }
 
     public void checkWin() {
-        if (survivors.isEmpty()) {
-            String msg = plugin.getConfig().getString("messages.all-infected.chat", "&cAll survivors infected!");
-            String title = plugin.getConfig().getString("messages.all-infected.title", "&4Zombies Win!");
-            String subtitle = plugin.getConfig().getString("messages.all-infected.subtitle", "&7All survivors have been infected!");
+        if (!gameRunning) return;
 
-            // Send chat message
-            Bukkit.broadcastMessage(ChatColor.translateAlternateColorCodes('&', msg));
+        RoundWinCondition.determine(survivors.size(), infected.size())
+                .ifPresent(this::announceWinner);
+    }
 
-            // Send title to all players
-            for (Player player : Bukkit.getOnlinePlayers()) {
-                player.sendTitle(
-                        ChatColor.translateAlternateColorCodes('&', title),
-                        ChatColor.translateAlternateColorCodes('&', subtitle),
-                        10, 80, 20
-                );
-                player.playSound(player.getLocation(), Sound.ENTITY_WITHER_SPAWN, 1.0f, 1.0f);
-            }
-            stopGame();
+    private void announceWinner(RoundWinner winner) {
+        String messagePath = winner == RoundWinner.SURVIVORS ? "messages.all-survivors" : "messages.all-infected";
+        String defaultChat = winner == RoundWinner.SURVIVORS
+                ? "&2All infected have been eliminated! Survivors win!"
+                : "&cAll survivors infected!";
+        String defaultTitle = winner == RoundWinner.SURVIVORS ? "&2Survivors Win!" : "&4Zombies Win!";
+        String defaultSubtitle = winner == RoundWinner.SURVIVORS
+                ? "&7All infected have been eliminated!"
+                : "&7All survivors have been infected!";
+        Sound victorySound = winner == RoundWinner.SURVIVORS
+                ? Sound.ENTITY_PLAYER_LEVELUP
+                : Sound.ENTITY_WITHER_SPAWN;
+
+        Bukkit.broadcastMessage(color(plugin.getConfig().getString(messagePath + ".chat", defaultChat)));
+        for (Player player : Bukkit.getOnlinePlayers()) {
+            player.sendTitle(
+                    color(plugin.getConfig().getString(messagePath + ".title", defaultTitle)),
+                    color(plugin.getConfig().getString(messagePath + ".subtitle", defaultSubtitle)),
+                    10, 80, 20
+            );
+            player.playSound(player.getLocation(), victorySound, 1.0f, 1.0f);
         }
+        stopGame();
+    }
+
+    private int getConfiguredInfectedLives() {
+        return Math.max(1, plugin.getConfig().getInt("settings.infected-lives", 3));
     }
 
      // Starts the feather spawning task
