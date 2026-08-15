@@ -11,6 +11,7 @@ import org.bukkit.event.inventory.ClickType;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.MockedStatic;
+import org.mockito.ArgumentCaptor;
 
 import java.util.List;
 import java.util.Map;
@@ -43,15 +44,24 @@ class AdminGuiManagerTest {
     @Test
     void pointSlotKeepsItsOriginalNameWhenSortedConfigurationChanges() {
         AdminMenuHolder holder = AdminMenuHolder.page(
-                AdminMenuHolder.MenuType.TELEPORT_POINTS, 2, Map.of(9, "north"));
+                AdminMenuHolder.MenuType.TELEPORT_POINTS, 0, Map.of(9, "north"));
         when(setupService.teleportPoints()).thenReturn(List.of(
-                point("south", new AdminSetupService.StoredLocation("arena", 1, 64, 1, 0, 0))));
+                point("alpha", new AdminSetupService.StoredLocation("arena", 1, 64, 1, 0, 0)),
+                point("north", new AdminSetupService.StoredLocation("arena", 20, 70, 20, 0, 0))));
+        when(administrator.teleport(any(Location.class))).thenReturn(true);
+        World world = mock(World.class);
 
-        manager.handleClick(administrator, holder, 9, ClickType.SHIFT_RIGHT);
+        try (MockedStatic<Bukkit> bukkit = mockStatic(Bukkit.class)) {
+            bukkit.when(() -> Bukkit.getWorld("arena")).thenReturn(world);
 
-        verify(administrator).sendMessage(contains("changed while the menu was open"));
-        verify(manager).openTeleportPoints(administrator, 2);
-        verify(setupService, never()).deleteTeleportPoint(anyString());
+            manager.handleClick(administrator, holder, 9, ClickType.LEFT);
+        }
+
+        ArgumentCaptor<Location> destination = ArgumentCaptor.forClass(Location.class);
+        verify(administrator).teleport(destination.capture());
+        org.junit.jupiter.api.Assertions.assertEquals(20.5, destination.getValue().getX());
+        org.junit.jupiter.api.Assertions.assertEquals(71.0, destination.getValue().getY());
+        org.junit.jupiter.api.Assertions.assertEquals(20.5, destination.getValue().getZ());
     }
 
     @Test
