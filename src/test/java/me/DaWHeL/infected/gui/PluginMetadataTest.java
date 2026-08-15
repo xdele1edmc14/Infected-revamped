@@ -18,6 +18,7 @@ class PluginMetadataTest {
                 new InputStreamReader(stream, StandardCharsets.UTF_8));
 
         assertAll(
+                () -> assertEquals("1.0.1", metadata.getString("version")),
                 () -> assertTrue(metadata.isConfigurationSection("commands.infected")),
                 () -> assertEquals("infected.admin", metadata.getString("commands.infected.permission")),
                 () -> assertEquals("/infected [gui addteleport <name>]",

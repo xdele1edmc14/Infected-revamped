@@ -1,5 +1,5 @@
 name: Infected
-version: '1.1.0'
+version: '1.0.1'
 main: me.DaWHeL.infected.InfectedPlugin
 api-version: '1.21'
 load: STARTUP
@@ -66,5 +66,3 @@ permissions:
   infected.admin:
     description: Allows using all infected plugin admin commands
     default: op
-
-

@@ -1,15 +1,18 @@
 package me.DaWHeL.infected.gui;
 
 public final class AdminGuiLayout {
-    public static final int STATUS = 4;
-    public static final int INFECTED_SPAWN = 10;
-    public static final int TELEPORT_POINTS = 12;
+    public static final int MAIN_SIZE = 36;
+    public static final int STATUS = 11;
+    public static final int INFECTED_SPAWN = 12;
+    public static final int TELEPORT_POINTS = 13;
     public static final int SETUP_STATUS = 14;
-    public static final int EVENT_PLAYERS = 16;
-    public static final int START_EVENT = 28;
-    public static final int STOP_EVENT = 30;
-    public static final int RELOAD_CONFIG = 32;
-    public static final int QUICK_HELP = 40;
+    public static final int EVENT_PLAYERS = 15;
+    public static final int START_EVENT = 20;
+    public static final int STOP_EVENT = 22;
+    public static final int RELOAD_CONFIG = 24;
+    public static final int MAIN_BACK = 27;
+    public static final int QUICK_HELP = 34;
+    public static final int MAIN_CLOSE = 35;
 
     public static final int BACK = 45;
     public static final int PREVIOUS_PAGE = 46;

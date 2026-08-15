@@ -26,7 +26,7 @@ Shared item and layout helpers provide consistent names, concise lore, black/gra
 
 ### Main Control Desk
 
-The 54-slot `Infected Event Control` menu uses the requested slots: status at 4, infected spawn at 10, teleport points at 12, setup status at 14, players at 16, start at 28, stop at 30, reload at 32, help at 40, disabled root Back at 45, Close at 49, and Help/legend at 53. Empty functional space remains readable instead of being filled with unrelated decorations.
+The compact 36-slot `Infected Event Control` menu uses zero-based slot indexes. Its primary controls are centered across slots 11-15: status, infected spawn, teleport points, setup status, and players. Event actions use slots 20, 22, and 24 for start, stop, and reload. The footer places the disabled root Back item at 27, Quick Help at 34, and Close at 35. Quick Help is the main menu's only help item; the former duplicate Help/legend footer item is not shown. Empty functional space remains readable instead of being filled with unrelated decorations.
 
 Status colors communicate current state: green for ready/start, yellow for incomplete or caution, red for missing/blocked/destructive actions, and aqua for navigation or information.
 

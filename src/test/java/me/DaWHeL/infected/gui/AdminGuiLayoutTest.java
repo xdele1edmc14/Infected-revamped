@@ -8,18 +8,18 @@ class AdminGuiLayoutTest {
     @Test
     void mainControlsUseTheRequestedSlots() {
         assertAll(
-                () -> assertEquals(4, AdminGuiLayout.STATUS),
-                () -> assertEquals(10, AdminGuiLayout.INFECTED_SPAWN),
-                () -> assertEquals(12, AdminGuiLayout.TELEPORT_POINTS),
+                () -> assertEquals(36, AdminGuiLayout.MAIN_SIZE),
+                () -> assertEquals(11, AdminGuiLayout.STATUS),
+                () -> assertEquals(12, AdminGuiLayout.INFECTED_SPAWN),
+                () -> assertEquals(13, AdminGuiLayout.TELEPORT_POINTS),
                 () -> assertEquals(14, AdminGuiLayout.SETUP_STATUS),
-                () -> assertEquals(16, AdminGuiLayout.EVENT_PLAYERS),
-                () -> assertEquals(28, AdminGuiLayout.START_EVENT),
-                () -> assertEquals(30, AdminGuiLayout.STOP_EVENT),
-                () -> assertEquals(32, AdminGuiLayout.RELOAD_CONFIG),
-                () -> assertEquals(40, AdminGuiLayout.QUICK_HELP),
-                () -> assertEquals(45, AdminGuiLayout.BACK),
-                () -> assertEquals(49, AdminGuiLayout.CLOSE),
-                () -> assertEquals(53, AdminGuiLayout.HELP)
+                () -> assertEquals(15, AdminGuiLayout.EVENT_PLAYERS),
+                () -> assertEquals(20, AdminGuiLayout.START_EVENT),
+                () -> assertEquals(22, AdminGuiLayout.STOP_EVENT),
+                () -> assertEquals(24, AdminGuiLayout.RELOAD_CONFIG),
+                () -> assertEquals(27, AdminGuiLayout.MAIN_BACK),
+                () -> assertEquals(34, AdminGuiLayout.QUICK_HELP),
+                () -> assertEquals(35, AdminGuiLayout.MAIN_CLOSE)
         );
     }
 

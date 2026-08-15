@@ -38,7 +38,8 @@ public final class AdminGuiManager implements AdminGuiNavigator, AdminGuiClickHa
     @Override
     public void openMain(Player player) {
         AdminMenuHolder holder = AdminMenuHolder.root(AdminMenuHolder.MenuType.MAIN);
-        Inventory menu = create(holder, 54, ChatColor.DARK_GRAY + "Infected Event Control");
+        Inventory menu = create(holder, AdminGuiLayout.MAIN_SIZE,
+                ChatColor.DARK_GRAY + "Infected Event Control");
         fillBorder(menu);
 
         AdminSetupService.SetupSnapshot snapshot = snapshot();
@@ -122,12 +123,11 @@ public final class AdminGuiManager implements AdminGuiNavigator, AdminGuiClickHa
                 "",
                 ChatColor.AQUA + "Click: " + ChatColor.GRAY + "Open guide"
         ));
-        menu.setItem(AdminGuiLayout.BACK, AdminGuiItems.item(
+        menu.setItem(AdminGuiLayout.MAIN_BACK, AdminGuiItems.item(
                 Material.GRAY_DYE, ChatColor.DARK_GRAY, "Back",
                 ChatColor.GRAY + "You are at the main control desk."
         ));
-        menu.setItem(AdminGuiLayout.CLOSE, closeItem());
-        menu.setItem(AdminGuiLayout.HELP, helpItem());
+        menu.setItem(AdminGuiLayout.MAIN_CLOSE, closeItem());
         player.openInventory(menu);
     }
 
@@ -387,8 +387,8 @@ public final class AdminGuiManager implements AdminGuiNavigator, AdminGuiClickHa
             case AdminGuiLayout.START_EVENT -> requestStart(player);
             case AdminGuiLayout.STOP_EVENT -> requestStop(player);
             case AdminGuiLayout.RELOAD_CONFIG -> reload(player);
-            case AdminGuiLayout.QUICK_HELP, AdminGuiLayout.HELP -> openHelp(player);
-            case AdminGuiLayout.CLOSE -> player.closeInventory();
+            case AdminGuiLayout.QUICK_HELP -> openHelp(player);
+            case AdminGuiLayout.MAIN_CLOSE -> player.closeInventory();
             default -> {
             }
         }
