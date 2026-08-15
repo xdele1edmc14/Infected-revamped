@@ -6,6 +6,10 @@ load: STARTUP
 authors: [ DaWHeL ]
 description: An infected minigame created for Outcraft
 commands:
+  infected:
+    description: Opens the Infected event administration control desk
+    usage: "/infected [gui addteleport <name>]"
+    permission: infected.admin
   startinfected:
     description: Start the infected game
     permission: infected.admin

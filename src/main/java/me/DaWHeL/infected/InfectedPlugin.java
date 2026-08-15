@@ -2,9 +2,16 @@ package me.DaWHeL.infected;
 
 import me.DaWHeL.infected.Handlers.*;
 import me.DaWHeL.infected.commands.*;
+import me.DaWHeL.infected.gui.AdminGuiListener;
+import me.DaWHeL.infected.gui.AdminGuiManager;
+import me.DaWHeL.infected.gui.AdminSetupService;
+import me.DaWHeL.infected.gui.InfectedAdminCommand;
 
 import org.bukkit.Bukkit;
+import org.bukkit.command.PluginCommand;
 import org.bukkit.plugin.java.JavaPlugin;
+
+import java.util.Objects;
 
 public final class InfectedPlugin extends JavaPlugin {
 
@@ -19,7 +26,16 @@ public final class InfectedPlugin extends JavaPlugin {
         gameManager = new GameManager(this);
         teleportManager = new TeleportManager(this);
 
+        AdminSetupService adminSetupService = new AdminSetupService(this);
+        AdminGuiManager adminGuiManager = new AdminGuiManager(this, gameManager, adminSetupService);
+        InfectedAdminCommand infectedAdminCommand = new InfectedAdminCommand(
+                gameManager, adminSetupService, adminGuiManager);
+
         // Register Commands
+        PluginCommand infectedCommand = Objects.requireNonNull(getCommand("infected"),
+                "The infected command is missing from plugin.yml");
+        infectedCommand.setExecutor(infectedAdminCommand);
+        infectedCommand.setTabCompleter(infectedAdminCommand);
         getCommand("startinfected").setExecutor(new StartGame(gameManager, this));
         getCommand("togglezombie").setExecutor(new ToggleZombie(gameManager));
         getCommand("stopinfected").setExecutor(new StopGame(gameManager));
@@ -46,6 +62,7 @@ public final class InfectedPlugin extends JavaPlugin {
         getServer().getPluginManager().registerEvents(new InfectedDeathListener(gameManager), this);
         getServer().getPluginManager().registerEvents(new FriendlyFireListener(gameManager), this);
         getServer().getPluginManager().registerEvents(new JumpFeatherListener(gameManager, this), this);
+        getServer().getPluginManager().registerEvents(new AdminGuiListener(adminGuiManager), this);
 
         // Start feather spawning
         gameManager.startFeatherTask();
