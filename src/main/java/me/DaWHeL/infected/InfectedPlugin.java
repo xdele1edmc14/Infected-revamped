@@ -62,7 +62,7 @@ public final class InfectedPlugin extends JavaPlugin {
         getServer().getPluginManager().registerEvents(new InfectedDeathListener(gameManager), this);
         getServer().getPluginManager().registerEvents(new FriendlyFireListener(gameManager), this);
         getServer().getPluginManager().registerEvents(new JumpFeatherListener(gameManager, this), this);
-        getServer().getPluginManager().registerEvents(new AdminGuiListener(adminGuiManager), this);
+        getServer().getPluginManager().registerEvents(new AdminGuiListener(this, adminGuiManager), this);
 
         // Start feather spawning
         gameManager.startFeatherTask();

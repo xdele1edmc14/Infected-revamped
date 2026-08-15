@@ -6,37 +6,67 @@ import org.jetbrains.annotations.NotNull;
 
 import java.util.Objects;
 import java.util.UUID;
+import java.util.Map;
 
 public final class AdminMenuHolder implements InventoryHolder {
     private final MenuType type;
     private final int page;
     private final String target;
     private final ConfirmationAction confirmationAction;
+    private final Map<Integer, String> slotTargets;
+    private final String expectedState;
     private Inventory inventory;
 
-    private AdminMenuHolder(MenuType type, int page, String target, ConfirmationAction confirmationAction) {
+    private AdminMenuHolder(
+            MenuType type,
+            int page,
+            String target,
+            ConfirmationAction confirmationAction,
+            Map<Integer, String> slotTargets,
+            String expectedState
+    ) {
         this.type = Objects.requireNonNull(type, "type");
         this.page = Math.max(0, page);
         this.target = target;
         this.confirmationAction = confirmationAction;
+        this.slotTargets = Map.copyOf(slotTargets);
+        this.expectedState = expectedState;
     }
 
     public static AdminMenuHolder root(MenuType type) {
-        return new AdminMenuHolder(type, 0, null, null);
+        return new AdminMenuHolder(type, 0, null, null, Map.of(), null);
     }
 
     public static AdminMenuHolder page(MenuType type, int page) {
-        return new AdminMenuHolder(type, page, null, null);
+        return page(type, page, Map.of());
+    }
+
+    public static AdminMenuHolder page(MenuType type, int page, Map<Integer, String> slotTargets) {
+        return new AdminMenuHolder(type, page, null, null,
+                Objects.requireNonNull(slotTargets, "slotTargets"), null);
     }
 
     public static AdminMenuHolder playerActions(UUID playerId, int returnPage) {
+        return playerActions(playerId, returnPage, null);
+    }
+
+    public static AdminMenuHolder playerActions(UUID playerId, int returnPage, String expectedTeam) {
         return new AdminMenuHolder(MenuType.PLAYER_ACTIONS, returnPage,
-                Objects.requireNonNull(playerId, "playerId").toString(), null);
+                Objects.requireNonNull(playerId, "playerId").toString(), null, Map.of(), expectedTeam);
     }
 
     public static AdminMenuHolder confirmation(ConfirmationAction action, String target, int returnPage) {
+        return confirmation(action, target, null, returnPage);
+    }
+
+    public static AdminMenuHolder confirmation(
+            ConfirmationAction action,
+            String target,
+            String expectedState,
+            int returnPage
+    ) {
         return new AdminMenuHolder(MenuType.CONFIRMATION, returnPage, target,
-                Objects.requireNonNull(action, "action"));
+                Objects.requireNonNull(action, "action"), Map.of(), expectedState);
     }
 
     void bind(Inventory inventory) {
@@ -60,6 +90,14 @@ public final class AdminMenuHolder implements InventoryHolder {
 
     public ConfirmationAction confirmationAction() {
         return confirmationAction;
+    }
+
+    public String slotTarget(int rawSlot) {
+        return slotTargets.get(rawSlot);
+    }
+
+    public String expectedState() {
+        return expectedState;
     }
 
     @Override

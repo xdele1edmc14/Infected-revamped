@@ -1,5 +1,6 @@
 package me.DaWHeL.infected.gui;
 
+import me.DaWHeL.infected.InfectedPlugin;
 import org.bukkit.ChatColor;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -10,13 +11,21 @@ import org.bukkit.event.inventory.InventoryDragEvent;
 import org.bukkit.inventory.InventoryView;
 
 import java.util.Objects;
+import java.util.Set;
 
 public final class AdminGuiListener implements Listener {
     private static final String ADMIN_PERMISSION = "infected.admin";
+    private static final Set<org.bukkit.event.inventory.ClickType> ACTION_CLICKS = Set.of(
+            org.bukkit.event.inventory.ClickType.LEFT,
+            org.bukkit.event.inventory.ClickType.RIGHT,
+            org.bukkit.event.inventory.ClickType.SHIFT_RIGHT
+    );
 
+    private final InfectedPlugin plugin;
     private final AdminGuiClickHandler clickHandler;
 
-    public AdminGuiListener(AdminGuiClickHandler clickHandler) {
+    public AdminGuiListener(InfectedPlugin plugin, AdminGuiClickHandler clickHandler) {
+        this.plugin = Objects.requireNonNull(plugin, "plugin");
         this.clickHandler = Objects.requireNonNull(clickHandler, "clickHandler");
     }
 
@@ -31,19 +40,30 @@ public final class AdminGuiListener implements Listener {
         if (!(event.getWhoClicked() instanceof Player player)) {
             return;
         }
-        if (!player.hasPermission(ADMIN_PERMISSION)) {
-            player.closeInventory();
-            player.sendMessage(ChatColor.RED + "You no longer have permission to use the Infected admin controls.");
+        if (event.getAction() == InventoryAction.NOTHING) {
             return;
         }
-        if (event.getAction() == InventoryAction.NOTHING) {
+        if (!ACTION_CLICKS.contains(event.getClick())) {
             return;
         }
         if (!AdminGuiPolicy.isTopInventoryClick(event.getRawSlot(), event.getView().getTopInventory().getSize())) {
             return;
         }
 
-        clickHandler.handleClick(player, holder, event.getRawSlot(), event.getClick());
+        int rawSlot = event.getRawSlot();
+        org.bukkit.event.inventory.ClickType clickType = event.getClick();
+        plugin.getServer().getScheduler().runTask(plugin, () -> {
+            if (!isSameMenuOpen(player, holder)) {
+                return;
+            }
+            if (!player.hasPermission(ADMIN_PERMISSION)) {
+                player.closeInventory();
+                player.sendMessage(ChatColor.RED
+                        + "You no longer have permission to use the Infected admin controls.");
+                return;
+            }
+            clickHandler.handleClick(player, holder, rawSlot, clickType);
+        });
     }
 
     @EventHandler
@@ -58,5 +78,9 @@ public final class AdminGuiListener implements Listener {
             return holder;
         }
         return null;
+    }
+
+    private static boolean isSameMenuOpen(Player player, AdminMenuHolder expected) {
+        return player.getOpenInventory().getTopInventory().getHolder() == expected;
     }
 }

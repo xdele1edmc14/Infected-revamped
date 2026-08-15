@@ -1,5 +1,7 @@
 package me.DaWHeL.infected.gui;
 
+import java.util.Objects;
+
 public final class AdminGuiPolicy {
     private AdminGuiPolicy() {
     }
@@ -24,5 +26,9 @@ public final class AdminGuiPolicy {
 
     public static boolean isTopInventoryClick(int rawSlot, int topSize) {
         return rawSlot >= 0 && rawSlot < topSize;
+    }
+
+    public static boolean matchesExpected(String expected, String current) {
+        return expected != null && Objects.equals(expected, current);
     }
 }

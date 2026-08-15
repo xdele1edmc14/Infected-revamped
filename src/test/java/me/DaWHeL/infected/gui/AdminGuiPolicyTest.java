@@ -3,6 +3,8 @@ package me.DaWHeL.infected.gui;
 import org.junit.jupiter.api.Test;
 
 import java.util.UUID;
+import java.util.HashMap;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -64,6 +66,29 @@ class AdminGuiPolicyTest {
     @Test
     void rejectsInvalidPageSizes() {
         assertThrows(IllegalArgumentException.class, () -> AdminGuiPolicy.pageCount(1, 0));
+    }
+
+    @Test
+    void holderKeepsImmutableSlotTargetsAndExpectedState() {
+        Map<Integer, String> targets = new HashMap<>();
+        targets.put(9, "north");
+        AdminMenuHolder page = AdminMenuHolder.page(
+                AdminMenuHolder.MenuType.TELEPORT_POINTS, 1, targets);
+        targets.put(9, "changed-after-creation");
+        AdminMenuHolder player = AdminMenuHolder.playerActions(UUID.randomUUID(), 0, "survivor");
+        AdminMenuHolder confirmation = AdminMenuHolder.confirmation(
+                AdminMenuHolder.ConfirmationAction.DELETE_TELEPORT_POINT,
+                "north", "arena|1|64|1", 1);
+
+        assertAll(
+                () -> assertEquals("north", page.slotTarget(9)),
+                () -> assertNull(page.slotTarget(10)),
+                () -> assertEquals("survivor", player.expectedState()),
+                () -> assertEquals("arena|1|64|1", confirmation.expectedState()),
+                () -> assertTrue(AdminGuiPolicy.matchesExpected("survivor", "survivor")),
+                () -> assertFalse(AdminGuiPolicy.matchesExpected("survivor", "infected")),
+                () -> assertFalse(AdminGuiPolicy.matchesExpected(null, "infected"))
+        );
     }
 
     private static AdminSetupService.SetupSnapshot snapshot(boolean spawn, int points) {

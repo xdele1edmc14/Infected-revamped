@@ -15,7 +15,9 @@ import org.bukkit.inventory.Inventory;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
@@ -154,11 +156,18 @@ public final class AdminGuiManager implements AdminGuiNavigator, AdminGuiClickHa
     public void openTeleportPoints(Player player, int requestedPage) {
         List<AdminSetupService.TeleportPoint> points = setupService.teleportPoints();
         int page = AdminGuiPolicy.clampPage(requestedPage, points.size(), AdminGuiLayout.PAGE_SIZE);
-        AdminMenuHolder holder = AdminMenuHolder.page(AdminMenuHolder.MenuType.TELEPORT_POINTS, page);
+        int pages = AdminGuiPolicy.pageCount(points.size(), AdminGuiLayout.PAGE_SIZE);
+        int first = page * AdminGuiLayout.PAGE_SIZE;
+        int last = Math.min(first + AdminGuiLayout.PAGE_SIZE, points.size());
+        Map<Integer, String> slotTargets = new HashMap<>();
+        for (int index = first; index < last; index++) {
+            slotTargets.put(AdminGuiLayout.contentSlot(index - first), points.get(index).name());
+        }
+        AdminMenuHolder holder = AdminMenuHolder.page(
+                AdminMenuHolder.MenuType.TELEPORT_POINTS, page, slotTargets);
         Inventory menu = create(holder, 54, ChatColor.DARK_GRAY + "Teleport Points");
         fillTopAndBottom(menu);
 
-        int pages = AdminGuiPolicy.pageCount(points.size(), AdminGuiLayout.PAGE_SIZE);
         menu.setItem(4, AdminGuiItems.item(
                 Material.ENDER_EYE,
                 ChatColor.AQUA,
@@ -168,8 +177,6 @@ public final class AdminGuiManager implements AdminGuiNavigator, AdminGuiClickHa
                 ChatColor.YELLOW + "GUI changes never modify arena blocks."
         ));
 
-        int first = page * AdminGuiLayout.PAGE_SIZE;
-        int last = Math.min(first + AdminGuiLayout.PAGE_SIZE, points.size());
         for (int index = first; index < last; index++) {
             AdminSetupService.TeleportPoint point = points.get(index);
             AdminSetupService.StoredLocation location = point.location();
@@ -262,7 +269,13 @@ public final class AdminGuiManager implements AdminGuiNavigator, AdminGuiClickHa
         List<PlayerEntry> players = playerEntries();
         int page = AdminGuiPolicy.clampPage(requestedPage, players.size(), AdminGuiLayout.PAGE_SIZE);
         int pages = AdminGuiPolicy.pageCount(players.size(), AdminGuiLayout.PAGE_SIZE);
-        AdminMenuHolder holder = AdminMenuHolder.page(AdminMenuHolder.MenuType.PLAYERS, page);
+        int first = page * AdminGuiLayout.PAGE_SIZE;
+        int last = Math.min(first + AdminGuiLayout.PAGE_SIZE, players.size());
+        Map<Integer, String> slotTargets = new HashMap<>();
+        for (int index = first; index < last; index++) {
+            slotTargets.put(AdminGuiLayout.contentSlot(index - first), players.get(index).id().toString());
+        }
+        AdminMenuHolder holder = AdminMenuHolder.page(AdminMenuHolder.MenuType.PLAYERS, page, slotTargets);
         Inventory menu = create(holder, 54, ChatColor.DARK_GRAY + "Infected Event Players");
         fillTopAndBottom(menu);
         menu.setItem(4, AdminGuiItems.item(
@@ -274,8 +287,6 @@ public final class AdminGuiManager implements AdminGuiNavigator, AdminGuiClickHa
                 ChatColor.GRAY + "Page " + (page + 1) + " of " + pages
         ));
 
-        int first = page * AdminGuiLayout.PAGE_SIZE;
-        int last = Math.min(first + AdminGuiLayout.PAGE_SIZE, players.size());
         for (int index = first; index < last; index++) {
             PlayerEntry entry = players.get(index);
             menu.setItem(AdminGuiLayout.contentSlot(index - first), AdminGuiItems.playerHead(
@@ -307,7 +318,7 @@ public final class AdminGuiManager implements AdminGuiNavigator, AdminGuiClickHa
         }
 
         PlayerEntry target = entry.get();
-        AdminMenuHolder holder = AdminMenuHolder.playerActions(target.id(), returnPage);
+        AdminMenuHolder holder = AdminMenuHolder.playerActions(target.id(), returnPage, teamKey(target));
         Inventory menu = create(holder, 54, ChatColor.DARK_GRAY + "Player Actions");
         fillBorder(menu);
         menu.setItem(4, AdminGuiItems.playerHead(target.player(),
@@ -359,8 +370,8 @@ public final class AdminGuiManager implements AdminGuiNavigator, AdminGuiClickHa
         switch (holder.type()) {
             case MAIN -> handleMainClick(player, rawSlot, clickType);
             case LIVE_STATUS, SETUP_STATUS, HELP -> handleInformationalClick(player, rawSlot);
-            case TELEPORT_POINTS -> handleTeleportClick(player, holder.page(), rawSlot, clickType);
-            case PLAYERS -> handlePlayersClick(player, holder.page(), rawSlot);
+            case TELEPORT_POINTS -> handleTeleportClick(player, holder, rawSlot, clickType);
+            case PLAYERS -> handlePlayersClick(player, holder, rawSlot);
             case PLAYER_ACTIONS -> handlePlayerActionClick(player, holder, rawSlot);
             case CONFIRMATION -> handleConfirmationClick(player, holder, rawSlot);
         }
@@ -390,7 +401,9 @@ public final class AdminGuiManager implements AdminGuiNavigator, AdminGuiClickHa
                 openMain(player);
                 return;
             }
-            openConfirmation(player, AdminMenuHolder.ConfirmationAction.CLEAR_INFECTED_SPAWN, null, 0);
+            AdminSetupService.StoredLocation expected = setupService.infectedSpawn().orElseThrow();
+            openConfirmation(player, AdminMenuHolder.ConfirmationAction.CLEAR_INFECTED_SPAWN,
+                    null, stateKey(expected), 0);
             return;
         }
         if (click.isRightClick()) {
@@ -414,7 +427,8 @@ public final class AdminGuiManager implements AdminGuiNavigator, AdminGuiClickHa
         }
     }
 
-    private void handleTeleportClick(Player player, int page, int slot, ClickType click) {
+    private void handleTeleportClick(Player player, AdminMenuHolder holder, int slot, ClickType click) {
+        int page = holder.page();
         if (slot == AdminGuiLayout.BACK) {
             openMain(player);
             return;
@@ -439,27 +453,29 @@ public final class AdminGuiManager implements AdminGuiNavigator, AdminGuiClickHa
             return;
         }
 
-        int offset = AdminGuiLayout.contentOffset(slot);
-        if (offset < 0) {
+        String pointName = holder.slotTarget(slot);
+        if (pointName == null) {
             return;
         }
-        List<AdminSetupService.TeleportPoint> points = setupService.teleportPoints();
-        int index = page * AdminGuiLayout.PAGE_SIZE + offset;
-        if (index >= points.size()) {
+        Optional<AdminSetupService.TeleportPoint> selected = setupService.teleportPoints().stream()
+                .filter(point -> point.name().equals(pointName))
+                .findFirst();
+        if (selected.isEmpty()) {
             player.sendMessage(ChatColor.YELLOW + "That teleport point changed while the menu was open.");
             openTeleportPoints(player, page);
             return;
         }
-        AdminSetupService.TeleportPoint point = points.get(index);
+        AdminSetupService.TeleportPoint point = selected.get();
         if (click.isRightClick() && click.isShiftClick()) {
             openConfirmation(player, AdminMenuHolder.ConfirmationAction.DELETE_TELEPORT_POINT,
-                    point.name(), page);
+                    point.name(), stateKey(point.location()), page);
         } else if (click.isLeftClick()) {
-            teleportToPoint(player, point);
+            teleportToPoint(player, point, page);
         }
     }
 
-    private void handlePlayersClick(Player player, int page, int slot) {
+    private void handlePlayersClick(Player player, AdminMenuHolder holder, int slot) {
+        int page = holder.page();
         if (slot == AdminGuiLayout.BACK) {
             openMain(player);
             return;
@@ -481,18 +497,27 @@ public final class AdminGuiManager implements AdminGuiNavigator, AdminGuiClickHa
             return;
         }
 
-        int offset = AdminGuiLayout.contentOffset(slot);
-        if (offset < 0) {
+        String target = holder.slotTarget(slot);
+        if (target == null) {
             return;
         }
-        List<PlayerEntry> players = playerEntries();
-        int index = page * AdminGuiLayout.PAGE_SIZE + offset;
-        if (index >= players.size()) {
+        UUID targetId;
+        try {
+            targetId = UUID.fromString(target);
+        } catch (IllegalArgumentException exception) {
             player.sendMessage(ChatColor.YELLOW + "That player changed while the menu was open.");
             openPlayers(player, page);
             return;
         }
-        openPlayerActions(player, players.get(index).id(), page);
+        Optional<PlayerEntry> selected = playerEntries().stream()
+                .filter(entry -> entry.id().equals(targetId))
+                .findFirst();
+        if (selected.isEmpty()) {
+            player.sendMessage(ChatColor.YELLOW + "That player changed while the menu was open.");
+            openPlayers(player, page);
+            return;
+        }
+        openPlayerActions(player, selected.get().id(), page);
     }
 
     private void handlePlayerActionClick(Player administrator, AdminMenuHolder holder, int slot) {
@@ -513,12 +538,21 @@ public final class AdminGuiManager implements AdminGuiNavigator, AdminGuiClickHa
             return;
         }
         if (slot == 21) {
-            Player target = Bukkit.getPlayer(targetId);
-            if (target == null || playerEntries().stream().noneMatch(entry -> entry.id().equals(targetId))) {
+            Optional<PlayerEntry> currentEntry = playerEntries().stream()
+                    .filter(entry -> entry.id().equals(targetId))
+                    .findFirst();
+            if (currentEntry.isEmpty()) {
                 administrator.sendMessage(ChatColor.RED + "That participant is no longer online or registered.");
                 openPlayers(administrator, holder.page());
                 return;
             }
+            if (!AdminGuiPolicy.matchesExpected(holder.expectedState(), teamKey(currentEntry.get()))) {
+                administrator.sendMessage(ChatColor.YELLOW
+                        + "That participant's team changed while the menu was open. Review the new state first.");
+                openPlayerActions(administrator, targetId, holder.page());
+                return;
+            }
+            Player target = currentEntry.get().player();
             gameManager.toggleZombie(target);
             administrator.sendMessage(ChatColor.GREEN + "Toggled the team for " + target.getName() + ".");
             openPlayerActions(administrator, targetId, holder.page());
@@ -534,7 +568,7 @@ public final class AdminGuiManager implements AdminGuiNavigator, AdminGuiClickHa
             openMain(player);
             return;
         }
-        openConfirmation(player, AdminMenuHolder.ConfirmationAction.START, null, 0);
+        openConfirmation(player, AdminMenuHolder.ConfirmationAction.START, null, null, 0);
     }
 
     private void requestStop(Player player) {
@@ -543,7 +577,7 @@ public final class AdminGuiManager implements AdminGuiNavigator, AdminGuiClickHa
             openMain(player);
             return;
         }
-        openConfirmation(player, AdminMenuHolder.ConfirmationAction.STOP, null, 0);
+        openConfirmation(player, AdminMenuHolder.ConfirmationAction.STOP, null, null, 0);
     }
 
     private void reload(Player player) {
@@ -558,9 +592,10 @@ public final class AdminGuiManager implements AdminGuiNavigator, AdminGuiClickHa
             Player player,
             AdminMenuHolder.ConfirmationAction action,
             String target,
+            String expectedState,
             int returnPage
     ) {
-        AdminMenuHolder holder = AdminMenuHolder.confirmation(action, target, returnPage);
+        AdminMenuHolder holder = AdminMenuHolder.confirmation(action, target, expectedState, returnPage);
         Inventory menu = create(holder, 27, ChatColor.DARK_GRAY + confirmationTitle(action));
         fillAll(menu, Material.GRAY_STAINED_GLASS_PANE);
         menu.setItem(AdminGuiLayout.CONFIRM, AdminGuiItems.item(
@@ -604,6 +639,13 @@ public final class AdminGuiManager implements AdminGuiNavigator, AdminGuiClickHa
                 player.closeInventory();
             }
             case CLEAR_INFECTED_SPAWN -> {
+                String currentState = setupService.infectedSpawn().map(AdminGuiManager::stateKey).orElse(null);
+                if (!AdminGuiPolicy.matchesExpected(holder.expectedState(), currentState)) {
+                    player.sendMessage(ChatColor.YELLOW
+                            + "The infected spawn changed while confirmation was open. Review it again.");
+                    openMain(player);
+                    return;
+                }
                 if (setupService.clearInfectedSpawn()) {
                     player.sendMessage(ChatColor.GREEN + "Cleared the configured infected spawn.");
                 } else {
@@ -613,7 +655,18 @@ public final class AdminGuiManager implements AdminGuiNavigator, AdminGuiClickHa
             }
             case DELETE_TELEPORT_POINT -> {
                 String target = holder.target();
-                if (target != null && setupService.deleteTeleportPoint(target)) {
+                String currentState = target == null ? null : setupService.teleportPoints().stream()
+                        .filter(point -> point.name().equals(target))
+                        .map(point -> stateKey(point.location()))
+                        .findFirst()
+                        .orElse(null);
+                if (!AdminGuiPolicy.matchesExpected(holder.expectedState(), currentState)) {
+                    player.sendMessage(ChatColor.YELLOW
+                            + "That teleport point changed while confirmation was open. Review it again.");
+                    openTeleportPoints(player, holder.page());
+                    return;
+                }
+                if (setupService.deleteTeleportPoint(target)) {
                     player.sendMessage(ChatColor.GREEN + "Deleted teleport point '" + target
                             + "'. World blocks were left unchanged.");
                 } else {
@@ -645,19 +698,27 @@ public final class AdminGuiManager implements AdminGuiNavigator, AdminGuiClickHa
             openMain(player);
             return;
         }
-        player.teleport(location);
-        player.sendMessage(ChatColor.GREEN + "Teleported to the infected spawn.");
+        if (player.teleport(location)) {
+            player.sendMessage(ChatColor.GREEN + "Teleported to the infected spawn.");
+        } else {
+            player.sendMessage(ChatColor.RED + "The teleport was cancelled by another plugin.");
+            openMain(player);
+        }
     }
 
-    private void teleportToPoint(Player player, AdminSetupService.TeleportPoint point) {
+    private void teleportToPoint(Player player, AdminSetupService.TeleportPoint point, int returnPage) {
         Location location = resolve(point.location(), true);
         if (location == null) {
             player.sendMessage(ChatColor.RED + "World '" + point.location().world() + "' is not loaded.");
-            openTeleportPoints(player, 0);
+            openTeleportPoints(player, returnPage);
             return;
         }
-        player.teleport(location);
-        player.sendMessage(ChatColor.GREEN + "Teleported to '" + point.name() + "'.");
+        if (player.teleport(location)) {
+            player.sendMessage(ChatColor.GREEN + "Teleported to '" + point.name() + "'.");
+        } else {
+            player.sendMessage(ChatColor.RED + "The teleport was cancelled by another plugin.");
+            openTeleportPoints(player, returnPage);
+        }
     }
 
     private static Location resolve(AdminSetupService.StoredLocation stored, boolean safePointOffset) {
@@ -811,6 +872,19 @@ public final class AdminGuiManager implements AdminGuiNavigator, AdminGuiClickHa
 
     private static String coordinate(double value) {
         return String.format(java.util.Locale.ROOT, "%.1f", value);
+    }
+
+    private static String teamKey(PlayerEntry entry) {
+        return entry.infected() ? "infected" : "survivor";
+    }
+
+    private static String stateKey(AdminSetupService.StoredLocation location) {
+        return location.world()
+                + '|' + Long.toUnsignedString(Double.doubleToLongBits(location.x()))
+                + '|' + Long.toUnsignedString(Double.doubleToLongBits(location.y()))
+                + '|' + Long.toUnsignedString(Double.doubleToLongBits(location.z()))
+                + '|' + Integer.toUnsignedString(Float.floatToIntBits(location.yaw()))
+                + '|' + Integer.toUnsignedString(Float.floatToIntBits(location.pitch()));
     }
 
     private static org.bukkit.inventory.ItemStack backItem() {
