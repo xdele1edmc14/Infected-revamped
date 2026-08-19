@@ -1,6 +1,7 @@
 package me.DaWHeL.infected.gui;
 
 import me.DaWHeL.infected.GameManager;
+import me.DaWHeL.infected.SpawnRole;
 import org.bukkit.ChatColor;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
@@ -56,24 +57,46 @@ public final class InfectedAdminCommand implements CommandExecutor, TabCompleter
         if (args.length == 3
                 && args[0].equalsIgnoreCase("gui")
                 && args[1].equalsIgnoreCase("addteleport")) {
-            return addTeleportPoint(player, args[2]);
+            return addTeleportPoint(player, SpawnRole.SURVIVOR, args[2], true);
         }
 
-        player.sendMessage(ChatColor.YELLOW + "Usage: /infected gui addteleport <name>");
+        if (args.length == 4
+                && args[0].equalsIgnoreCase("gui")
+                && args[1].equalsIgnoreCase("addteleport")) {
+            return SpawnRole.fromCommandKey(args[2])
+                    .map(role -> addTeleportPoint(player, role, args[3], false))
+                    .orElseGet(() -> {
+                        player.sendMessage(ChatColor.YELLOW
+                                + "Usage: /infected gui addteleport <survivor|release|respawn> <name>");
+                        return true;
+                    });
+        }
+
+        player.sendMessage(ChatColor.YELLOW
+                + "Usage: /infected gui addteleport [survivor|release|respawn] <name>");
         return true;
     }
 
-    private boolean addTeleportPoint(Player player, String name) {
+    private boolean addTeleportPoint(Player player, SpawnRole role, String name, boolean survivorShorthand) {
         try {
             AdminSetupService.validatePointName(name);
-            setupService.saveTeleportPoint(name, player.getLocation());
+            if (survivorShorthand) {
+                setupService.saveTeleportPoint(name, player.getLocation());
+            } else {
+                setupService.saveTeleportPoint(role, name, player.getLocation());
+            }
         } catch (IllegalArgumentException exception) {
             player.sendMessage(ChatColor.RED + exception.getMessage());
             return true;
         }
 
-        player.sendMessage(ChatColor.GREEN + "Saved teleport point '" + name + "'. No arena blocks were changed.");
-        navigator.openTeleportPoints(player, 0);
+        player.sendMessage(ChatColor.GREEN + "Saved " + role.displayName().toLowerCase(Locale.ROOT)
+                + " spawn '" + name + "'. No arena blocks were changed.");
+        if (survivorShorthand) {
+            navigator.openTeleportPoints(player, 0);
+        } else {
+            navigator.openTeleportPoints(player, role, 0);
+        }
         return true;
     }
 
@@ -83,8 +106,7 @@ public final class InfectedAdminCommand implements CommandExecutor, TabCompleter
         AdminSetupService.SetupSnapshot snapshot = setupService.snapshot(survivors, infected);
 
         sender.sendMessage(ChatColor.GOLD + "Infected Event Control");
-        sender.sendMessage(ChatColor.GRAY + "State: "
-                + (gameManager.isGameRunning() ? ChatColor.GREEN + "Running" : ChatColor.YELLOW + "Stopped"));
+        sender.sendMessage(ChatColor.GRAY + "State: " + ChatColor.YELLOW + gameManager.getPhase().name());
         sender.sendMessage(ChatColor.GRAY + "Survivors: " + survivors + " | Infected: " + infected);
         sender.sendMessage(ChatColor.GRAY + "Setup: "
                 + (snapshot.ready() ? ChatColor.GREEN + "Ready" : ChatColor.RED + "Incomplete"));
@@ -111,6 +133,14 @@ public final class InfectedAdminCommand implements CommandExecutor, TabCompleter
         if (args.length == 3
                 && args[0].equalsIgnoreCase("gui")
                 && args[1].equalsIgnoreCase("addteleport")) {
+            return List.of("survivor", "release", "respawn").stream()
+                    .filter(candidate -> candidate.startsWith(args[2].toLowerCase(Locale.ROOT)))
+                    .toList();
+        }
+        if (args.length == 4
+                && args[0].equalsIgnoreCase("gui")
+                && args[1].equalsIgnoreCase("addteleport")
+                && SpawnRole.fromCommandKey(args[2]).isPresent()) {
             return List.of("<name>");
         }
         return List.of();

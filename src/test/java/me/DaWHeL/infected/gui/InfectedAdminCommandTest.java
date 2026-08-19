@@ -1,6 +1,8 @@
 package me.DaWHeL.infected.gui;
 
 import me.DaWHeL.infected.GameManager;
+import me.DaWHeL.infected.RoundPhase;
+import me.DaWHeL.infected.SpawnRole;
 import org.bukkit.ChatColor;
 import org.bukkit.Location;
 import org.bukkit.command.Command;
@@ -54,11 +56,11 @@ class InfectedAdminCommandTest {
     @Test
     void consoleReceivesCompactStatusAndHelp() {
         CommandSender console = mock(CommandSender.class);
-        when(gameManager.isGameRunning()).thenReturn(true);
+        when(gameManager.getPhase()).thenReturn(RoundPhase.HEADSTART);
         when(gameManager.getSurvivors()).thenReturn(List.of());
         when(gameManager.getInfected()).thenReturn(List.of());
         when(setupService.snapshot(0, 0)).thenReturn(
-                new AdminSetupService.SetupSnapshot(true, 2, 0, 0, 5, 10, 5));
+                new AdminSetupService.SetupSnapshot(true, 2, 2, 2, 6, 0, 2, 10, 5, 20));
 
         assertTrue(command.onCommand(console, bukkitCommand, "infected", new String[0]));
 
@@ -66,7 +68,7 @@ class InfectedAdminCommandTest {
         verify(console, atLeast(3)).sendMessage(messages.capture());
         String combined = ChatColor.stripColor(String.join("\n", messages.getAllValues()));
         assertAll(
-                () -> assertTrue(combined.contains("Running")),
+                () -> assertTrue(combined.contains("State: HEADSTART")),
                 () -> assertTrue(combined.contains("Survivors: 0")),
                 () -> assertTrue(combined.contains("Infected: 0")),
                 () -> assertTrue(combined.contains("Setup: Ready")),
@@ -85,6 +87,30 @@ class InfectedAdminCommandTest {
 
         verify(setupService).saveTeleportPoint("north", location);
         verify(navigator).openTeleportPoints(player, 0);
+    }
+
+    @Test
+    void roleAwareAddTeleportStoresAndReopensTheRequestedGroup() {
+        Player player = authorizedPlayer();
+        Location location = mock(Location.class);
+        when(player.getLocation()).thenReturn(location);
+
+        assertTrue(command.onCommand(player, bukkitCommand, "infected",
+                new String[]{"gui", "addteleport", "release", "north"}));
+
+        verify(setupService).saveTeleportPoint(SpawnRole.INFECTED_RELEASE, "north", location);
+        verify(navigator).openTeleportPoints(player, SpawnRole.INFECTED_RELEASE, 0);
+    }
+
+    @Test
+    void invalidSpawnRoleDoesNotWriteConfiguration() {
+        Player player = authorizedPlayer();
+
+        assertTrue(command.onCommand(player, bukkitCommand, "infected",
+                new String[]{"gui", "addteleport", "unknown", "north"}));
+
+        verify(player).sendMessage(contains("survivor|release|respawn"));
+        verifyNoInteractions(setupService, navigator);
     }
 
     @Test
@@ -107,9 +133,12 @@ class InfectedAdminCommandTest {
                         command.onTabComplete(player, bukkitCommand, "infected", new String[]{"g"})),
                 () -> assertEquals(List.of("addteleport"),
                         command.onTabComplete(player, bukkitCommand, "infected", new String[]{"gui", "a"})),
+                () -> assertEquals(List.of("survivor", "release", "respawn"),
+                        command.onTabComplete(player, bukkitCommand, "infected",
+                                new String[]{"gui", "addteleport", ""})),
                 () -> assertEquals(List.of("<name>"),
                         command.onTabComplete(player, bukkitCommand, "infected",
-                                new String[]{"gui", "addteleport", ""}))
+                                new String[]{"gui", "addteleport", "release", ""}))
         );
     }
 

@@ -16,13 +16,6 @@ public class PlayerQuitListener implements Listener {
 
     @EventHandler
     public void onPlayerQuit(PlayerQuitEvent event) {
-        Player player = event.getPlayer();
-
-        // Remove from survivors if present
-        gameManager.getSurvivors().removeIf(s -> s.getPlayer().equals(player));
-
-        // Remove from infected if present
-        gameManager.getInfected().removeIf(i -> i.getPlayer().equals(player));
-        gameManager.checkWin();
+        gameManager.handleQuit(event.getPlayer());
     }
 }

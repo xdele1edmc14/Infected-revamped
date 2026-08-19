@@ -2,6 +2,7 @@ package me.DaWHeL.infected.gui;
 
 import me.DaWHeL.infected.GameManager;
 import me.DaWHeL.infected.InfectedPlugin;
+import me.DaWHeL.infected.StartResult;
 import org.bukkit.Server;
 import org.bukkit.entity.Player;
 import org.junit.jupiter.api.BeforeEach;
@@ -34,32 +35,37 @@ class AdminEventActionsTest {
     }
 
     @Test
-    void startRejectsIncompleteSetupWithoutDispatchingLegacyCommand() {
-        when(setupService.snapshot(0, 0)).thenReturn(snapshot(false, 0));
+    void startReturnsCentralValidationErrorsWithoutDispatchingLegacyCommand() {
+        when(gameManager.startGame()).thenReturn(StartResult.rejected(List.of(
+                "Infected release spawns are missing or unavailable.",
+                "At least 2 online lobby participants are required."
+        )));
 
         AdminEventActions.ActionResult result = actions.start(admin);
 
         assertAll(
                 () -> assertFalse(result.success()),
-                () -> assertTrue(result.message().contains("incomplete"))
+                () -> assertTrue(result.message().contains("Infected release spawns")),
+                () -> assertTrue(result.message().contains("At least 2 online"))
         );
+        verify(gameManager).startGame();
         verifyNoInteractions(server);
     }
 
     @Test
-    void startDispatchesExistingCommandAfterRevalidation() {
-        when(setupService.snapshot(0, 0)).thenReturn(snapshot(true, 1));
-        when(server.dispatchCommand(admin, "startinfected")).thenReturn(true);
+    void startDelegatesToTheCentralRoundControllerExactlyOnce() {
+        when(gameManager.startGame()).thenReturn(StartResult.started());
 
         AdminEventActions.ActionResult result = actions.start(admin);
 
         assertTrue(result.success());
-        verify(server).dispatchCommand(admin, "startinfected");
+        verify(gameManager).startGame();
+        verifyNoInteractions(server);
     }
 
     @Test
     void stopRejectsStoppedEventAndStopsRunningEvent() {
-        when(gameManager.isGameRunning()).thenReturn(false, true);
+        when(gameManager.stopGame()).thenReturn(false, true);
 
         AdminEventActions.ActionResult stopped = actions.stop();
         AdminEventActions.ActionResult running = actions.stop();
@@ -68,10 +74,6 @@ class AdminEventActionsTest {
                 () -> assertFalse(stopped.success()),
                 () -> assertTrue(running.success())
         );
-        verify(gameManager).stopGame();
-    }
-
-    private static AdminSetupService.SetupSnapshot snapshot(boolean spawn, int points) {
-        return new AdminSetupService.SetupSnapshot(spawn, points, 0, 0, 5, 10, 5);
+        verify(gameManager, times(2)).stopGame();
     }
 }

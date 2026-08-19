@@ -12,6 +12,7 @@ import org.bukkit.command.PluginCommand;
 import org.bukkit.plugin.java.JavaPlugin;
 
 import java.util.Objects;
+import java.util.Random;
 
 public final class InfectedPlugin extends JavaPlugin {
 
@@ -23,10 +24,27 @@ public final class InfectedPlugin extends JavaPlugin {
 
         saveDefaultConfig();
 
-        gameManager = new GameManager(this);
-        teleportManager = new TeleportManager(this);
+        SpawnRepository spawnRepository = new SpawnRepository(this);
+        SpawnRepository.MigrationResult migration = spawnRepository.migrateLegacyTeleports();
+        if (migration.migrated()) {
+            getLogger().info("Migrated " + migration.copiedEntries()
+                    + " legacy teleport entries into role-specific spawn groups.");
+            migration.skippedPaths().forEach(path ->
+                    getLogger().warning("Skipped malformed legacy teleport point: " + path));
+        }
 
-        AdminSetupService adminSetupService = new AdminSetupService(this);
+        PluginTaskScheduler scheduler = new BukkitPluginTaskScheduler(this);
+        teleportManager = new TeleportManager(this, spawnRepository);
+        gameManager = new GameManager(
+                this,
+                spawnRepository,
+                teleportManager,
+                scheduler,
+                new RoundStartValidator(),
+                new Random()
+        );
+
+        AdminSetupService adminSetupService = new AdminSetupService(this, spawnRepository);
         AdminGuiManager adminGuiManager = new AdminGuiManager(this, gameManager, adminSetupService);
         InfectedAdminCommand infectedAdminCommand = new InfectedAdminCommand(
                 gameManager, adminSetupService, adminGuiManager);
@@ -36,13 +54,13 @@ public final class InfectedPlugin extends JavaPlugin {
                 "The infected command is missing from plugin.yml");
         infectedCommand.setExecutor(infectedAdminCommand);
         infectedCommand.setTabCompleter(infectedAdminCommand);
-        getCommand("startinfected").setExecutor(new StartGame(gameManager, this));
+        getCommand("startinfected").setExecutor(new StartGame(gameManager));
         getCommand("togglezombie").setExecutor(new ToggleZombie(gameManager));
         getCommand("stopinfected").setExecutor(new StopGame(gameManager));
         getCommand("addteleport").setExecutor(new AddTeleportCommand(this));
         getCommand("removeteleport").setExecutor(new RemoveTeleportCommand(this));
         getCommand("listteleportpoints").setExecutor(new ListTeleportPoints(this));
-        getCommand("reloadinfected").setExecutor(new Reload(this));
+        getCommand("reloadinfected").setExecutor(new Reload(this, gameManager));
         getCommand("tttp").setExecutor(new TeleportToTeleportPoint(this));
         getCommand("removeplayer").setExecutor(new RemovePlayer(gameManager));
         getCommand("buffinfected").setExecutor(new BuffInfectedCommand(gameManager, this));
@@ -53,14 +71,15 @@ public final class InfectedPlugin extends JavaPlugin {
         getCommand("givefeather").setExecutor(new GiveFeather());
 
         //Register Events
-        Bukkit.getPluginManager().registerEvents(new HitHandler(gameManager), this);
+        Bukkit.getPluginManager().registerEvents(new ParticipantDamageListener(gameManager), this);
+        Bukkit.getPluginManager().registerEvents(new InfectedContainmentListener(gameManager), this);
         Bukkit.getPluginManager().registerEvents(new HungerListener(), this);
-        getServer().getPluginManager().registerEvents(new PlayerJoinListener(this, gameManager), this);
+        getServer().getPluginManager().registerEvents(new PlayerJoinListener(gameManager), this);
         getServer().getPluginManager().registerEvents(new PlayerQuitListener(gameManager), this);
         getServer().getPluginManager().registerEvents(new InfectedInventoryLockListener(gameManager), this);
-        getServer().getPluginManager().registerEvents(new InfectedRespawnListener(gameManager), this);
+        getServer().getPluginManager().registerEvents(
+                new InfectedRespawnListener(gameManager, spawnRepository), this);
         getServer().getPluginManager().registerEvents(new InfectedDeathListener(gameManager), this);
-        getServer().getPluginManager().registerEvents(new FriendlyFireListener(gameManager), this);
         getServer().getPluginManager().registerEvents(new JumpFeatherListener(gameManager, this), this);
         getServer().getPluginManager().registerEvents(new AdminGuiListener(this, adminGuiManager), this);
 
@@ -80,6 +99,9 @@ public final class InfectedPlugin extends JavaPlugin {
 
     @Override
     public void onDisable() {
+        if (gameManager != null) {
+            gameManager.shutdown();
+        }
         getLogger().info("###################################");
         getLogger().info("#                                 #");
         getLogger().info("#    Infected Plugin Disabled!    #");

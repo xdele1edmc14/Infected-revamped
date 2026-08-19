@@ -1,5 +1,5 @@
 name: Infected
-version: '1.0.1'
+version: '1.0.3'
 main: me.DaWHeL.infected.InfectedPlugin
 api-version: '1.21'
 load: STARTUP
@@ -8,20 +8,20 @@ description: An infected minigame created for Outcraft
 commands:
   infected:
     description: Opens the Infected event administration control desk
-    usage: "/infected [gui addteleport <name>]"
+    usage: "/infected [gui addteleport [survivor|release|respawn] <name>]"
     permission: infected.admin
   startinfected:
     description: Start the infected game
     permission: infected.admin
   togglezombie:
-    description: Toggle yourself between survivor/zombie
+    description: Safely toggle an active participant or admit a queued spectator as infected
     usage: /togglezombie <player>
     permission: infected.admin
   stopinfected:
     description: Stop the infected game and reset players
     permission: infected.admin
   reloadinfected:
-    description: Reload the infected plugin configuration
+    description: Reload the infected plugin configuration while in the lobby
     permission: infected.admin
   addteleport:
     description: Add a teleport point for survivors or zombies
@@ -36,7 +36,7 @@ commands:
     usage: /tttp <pointName>
     permission: infected.admin
   removeplayer:
-    description: Remove a player from the survivors
+    description: Safely remove a participant or queued spectator from the current round
     usage: /removeplayer <player>
     permission: infected.admin
   listteleportpoints:

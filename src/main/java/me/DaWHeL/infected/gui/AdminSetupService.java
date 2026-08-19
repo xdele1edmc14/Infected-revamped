@@ -1,23 +1,30 @@
 package me.DaWHeL.infected.gui;
 
 import me.DaWHeL.infected.InfectedPlugin;
+import me.DaWHeL.infected.RoundStartValidator;
+import me.DaWHeL.infected.SpawnRepository;
+import me.DaWHeL.infected.SpawnRole;
 import org.bukkit.Location;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.FileConfiguration;
 
-import java.util.Comparator;
 import java.util.List;
+import java.util.EnumSet;
 import java.util.Objects;
 import java.util.Optional;
 
 public final class AdminSetupService {
     private static final String INFECTED_SPAWN = "infected-spawn";
-    private static final String TELEPORTS = "teleports";
-
     private final InfectedPlugin plugin;
+    private final SpawnRepository spawnRepository;
 
     public AdminSetupService(InfectedPlugin plugin) {
+        this(plugin, new SpawnRepository(plugin));
+    }
+
+    public AdminSetupService(InfectedPlugin plugin, SpawnRepository spawnRepository) {
         this.plugin = Objects.requireNonNull(plugin, "plugin");
+        this.spawnRepository = Objects.requireNonNull(spawnRepository, "spawnRepository");
     }
 
     public Optional<StoredLocation> infectedSpawn() {
@@ -25,29 +32,27 @@ public final class AdminSetupService {
     }
 
     public List<TeleportPoint> teleportPoints() {
-        ConfigurationSection section = config().getConfigurationSection(TELEPORTS);
-        if (section == null) {
-            return List.of();
-        }
+        return teleportPoints(SpawnRole.SURVIVOR);
+    }
 
-        return section.getKeys(false).stream()
-                .map(name -> readLocation(TELEPORTS + "." + name)
-                        .map(location -> new TeleportPoint(name, location)))
-                .flatMap(Optional::stream)
-                .sorted(Comparator.comparing(TeleportPoint::name, String.CASE_INSENSITIVE_ORDER)
-                        .thenComparing(TeleportPoint::name))
+    public List<TeleportPoint> teleportPoints(SpawnRole role) {
+        return spawnRepository.points(role).stream()
+                .map(point -> new TeleportPoint(point.name(), storedLocation(point.location())))
                 .toList();
     }
 
     public SetupSnapshot snapshot(int survivors, int infected) {
         return new SetupSnapshot(
                 infectedSpawn().isPresent(),
-                teleportPoints().size(),
+                teleportPoints(SpawnRole.SURVIVOR).size(),
+                teleportPoints(SpawnRole.INFECTED_RELEASE).size(),
+                teleportPoints(SpawnRole.INFECTED_RESPAWN).size(),
                 survivors,
                 infected,
                 config().getInt("settings.starting-zombies", 5),
                 config().getInt("settings.infected-teleport-delay", 10),
-                config().getInt("settings.teleport-batch-size", 5)
+                config().getInt("settings.teleport-batch-size", 5),
+                config().getInt("settings.teleport-delay", 20)
         );
     }
 
@@ -66,20 +71,21 @@ public final class AdminSetupService {
     }
 
     public void saveTeleportPoint(String name, Location location) {
+        saveTeleportPoint(SpawnRole.SURVIVOR, name, location);
+    }
+
+    public void saveTeleportPoint(SpawnRole role, String name, Location location) {
         validatePointName(name);
-        writeLocation(TELEPORTS + "." + name, location);
-        plugin.saveConfig();
+        spawnRepository.savePoint(role, name, location);
     }
 
     public boolean deleteTeleportPoint(String name) {
+        return deleteTeleportPoint(SpawnRole.SURVIVOR, name);
+    }
+
+    public boolean deleteTeleportPoint(SpawnRole role, String name) {
         validatePointName(name);
-        String path = TELEPORTS + "." + name;
-        if (!config().contains(path)) {
-            return false;
-        }
-        config().set(path, null);
-        plugin.saveConfig();
-        return true;
+        return spawnRepository.deletePoint(role, name);
     }
 
     public static void validatePointName(String name) {
@@ -125,6 +131,17 @@ public final class AdminSetupService {
         return plugin.getConfig();
     }
 
+    private static StoredLocation storedLocation(SpawnRepository.StoredSpawn stored) {
+        return new StoredLocation(
+                stored.world(),
+                stored.x(),
+                stored.y(),
+                stored.z(),
+                stored.yaw(),
+                stored.pitch()
+        );
+    }
+
     public record StoredLocation(String world, double x, double y, double z, float yaw, float pitch) {
     }
 
@@ -133,15 +150,67 @@ public final class AdminSetupService {
 
     public record SetupSnapshot(
             boolean infectedSpawnConfigured,
-            int teleportPointCount,
+            int survivorSpawnCount,
+            int infectedReleaseSpawnCount,
+            int infectedRespawnSpawnCount,
             int survivors,
             int infected,
             int startingInfected,
             int infectedTeleportDelay,
-            int teleportBatchSize
+            int teleportBatchSize,
+            int teleportDelayTicks
     ) {
+        public SetupSnapshot(
+                boolean infectedSpawnConfigured,
+                int teleportPointCount,
+                int survivors,
+                int infected,
+                int startingInfected,
+                int infectedTeleportDelay,
+                int teleportBatchSize
+        ) {
+            this(
+                    infectedSpawnConfigured,
+                    teleportPointCount,
+                    teleportPointCount,
+                    teleportPointCount,
+                    survivors,
+                    infected,
+                    startingInfected,
+                    infectedTeleportDelay,
+                    teleportBatchSize,
+                    0
+            );
+        }
+
+        public int teleportPointCount() {
+            return survivorSpawnCount;
+        }
+
         public boolean ready() {
-            return infectedSpawnConfigured && teleportPointCount > 0;
+            return validationErrors().isEmpty();
+        }
+
+        public List<String> validationErrors() {
+            EnumSet<SpawnRole> configuredRoles = EnumSet.noneOf(SpawnRole.class);
+            if (survivorSpawnCount > 0) {
+                configuredRoles.add(SpawnRole.SURVIVOR);
+            }
+            if (infectedReleaseSpawnCount > 0) {
+                configuredRoles.add(SpawnRole.INFECTED_RELEASE);
+            }
+            if (infectedRespawnSpawnCount > 0) {
+                configuredRoles.add(SpawnRole.INFECTED_RESPAWN);
+            }
+            return new RoundStartValidator().validate(new RoundStartValidator.Input(
+                    infectedSpawnConfigured,
+                    configuredRoles,
+                    survivors + infected,
+                    startingInfected,
+                    teleportBatchSize,
+                    teleportDelayTicks,
+                    infectedTeleportDelay
+            )).errors();
         }
     }
 }

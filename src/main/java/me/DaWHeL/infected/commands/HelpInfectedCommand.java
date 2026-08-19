@@ -14,13 +14,13 @@ public class HelpInfectedCommand implements CommandExecutor {
         sender.sendMessage(ChatColor.YELLOW + "/stopinfected" + ChatColor.GRAY + " - Stops the Infected game");
         sender.sendMessage(ChatColor.YELLOW + "/buffinfected" + ChatColor.GRAY + " - Gives all infected players a buff");
         sender.sendMessage(ChatColor.YELLOW + "/listplayers" + ChatColor.GRAY + " - Shows all survivors and infected");
-        sender.sendMessage(ChatColor.YELLOW + "/reloadinfected" + ChatColor.GRAY + " - Reloads the config file");
+        sender.sendMessage(ChatColor.YELLOW + "/reloadinfected" + ChatColor.GRAY + " - Reloads config in the lobby");
         sender.sendMessage(ChatColor.YELLOW + "/addteleport <pointName>" + ChatColor.GRAY + " - Adds a new teleport point");
         sender.sendMessage(ChatColor.YELLOW + "/removeteleport <pointName>" + ChatColor.GRAY + " - Removes a teleport point");
         sender.sendMessage(ChatColor.YELLOW + "/listteleportpoints" + ChatColor.GRAY + " - Lists all teleport points");
         sender.sendMessage(ChatColor.YELLOW + "/tttp <pointName>" + ChatColor.GRAY + " - Teleport to a teleport point");
-        sender.sendMessage(ChatColor.YELLOW + "/togglezombie <name>" + ChatColor.GRAY + " - Toggle your infected/survivor state manually");
-        sender.sendMessage(ChatColor.YELLOW + "/removeplayer <name>" + ChatColor.GRAY + " - Removes a player from the game");
+        sender.sendMessage(ChatColor.YELLOW + "/togglezombie <name>" + ChatColor.GRAY + " - Safely toggles an active player");
+        sender.sendMessage(ChatColor.YELLOW + "/removeplayer <name>" + ChatColor.GRAY + " - Safely removes a player from the round");
         sender.sendMessage(ChatColor.YELLOW + "/createinfectedspawn" + ChatColor.GRAY + " - Sets zombie spawn at the beggining of the game");
         sender.sendMessage(ChatColor.YELLOW + "/tpinfectedspawn" + ChatColor.GRAY + " - Teleports you to the infected spawn point");
         sender.sendMessage(ChatColor.YELLOW + "/givefeather" + ChatColor.GRAY + " - Gives you a test Jump Feather");

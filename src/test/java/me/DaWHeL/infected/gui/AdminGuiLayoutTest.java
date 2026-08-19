@@ -33,6 +33,15 @@ class AdminGuiLayoutTest {
     }
 
     @Test
+    void spawnRoleControlsAreCentered() {
+        assertAll(
+                () -> assertEquals(20, AdminGuiLayout.SURVIVOR_SPAWNS),
+                () -> assertEquals(22, AdminGuiLayout.INFECTED_RELEASE_SPAWNS),
+                () -> assertEquals(24, AdminGuiLayout.INFECTED_RESPAWN_SPAWNS)
+        );
+    }
+
+    @Test
     void pagedContentMapsOnlyTheFourReadableMiddleRows() {
         assertAll(
                 () -> assertEquals(36, AdminGuiLayout.PAGE_SIZE),

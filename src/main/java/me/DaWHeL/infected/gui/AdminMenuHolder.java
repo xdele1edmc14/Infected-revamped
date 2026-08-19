@@ -1,5 +1,6 @@
 package me.DaWHeL.infected.gui;
 
+import me.DaWHeL.infected.SpawnRole;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.InventoryHolder;
 import org.jetbrains.annotations.NotNull;
@@ -15,6 +16,7 @@ public final class AdminMenuHolder implements InventoryHolder {
     private final ConfirmationAction confirmationAction;
     private final Map<Integer, String> slotTargets;
     private final String expectedState;
+    private final SpawnRole spawnRole;
     private Inventory inventory;
 
     private AdminMenuHolder(
@@ -23,7 +25,8 @@ public final class AdminMenuHolder implements InventoryHolder {
             String target,
             ConfirmationAction confirmationAction,
             Map<Integer, String> slotTargets,
-            String expectedState
+            String expectedState,
+            SpawnRole spawnRole
     ) {
         this.type = Objects.requireNonNull(type, "type");
         this.page = Math.max(0, page);
@@ -31,10 +34,12 @@ public final class AdminMenuHolder implements InventoryHolder {
         this.confirmationAction = confirmationAction;
         this.slotTargets = Map.copyOf(slotTargets);
         this.expectedState = expectedState;
+        this.spawnRole = spawnRole;
     }
 
     public static AdminMenuHolder root(MenuType type) {
-        return new AdminMenuHolder(type, 0, null, null, Map.of(), null);
+        return new AdminMenuHolder(type, 0, null, null, Map.of(), null,
+                type == MenuType.TELEPORT_POINTS ? SpawnRole.SURVIVOR : null);
     }
 
     public static AdminMenuHolder page(MenuType type, int page) {
@@ -43,7 +48,19 @@ public final class AdminMenuHolder implements InventoryHolder {
 
     public static AdminMenuHolder page(MenuType type, int page, Map<Integer, String> slotTargets) {
         return new AdminMenuHolder(type, page, null, null,
-                Objects.requireNonNull(slotTargets, "slotTargets"), null);
+                Objects.requireNonNull(slotTargets, "slotTargets"), null,
+                type == MenuType.TELEPORT_POINTS ? SpawnRole.SURVIVOR : null);
+    }
+
+    public static AdminMenuHolder page(
+            MenuType type,
+            int page,
+            Map<Integer, String> slotTargets,
+            SpawnRole spawnRole
+    ) {
+        return new AdminMenuHolder(type, page, null, null,
+                Objects.requireNonNull(slotTargets, "slotTargets"), null,
+                Objects.requireNonNull(spawnRole, "spawnRole"));
     }
 
     public static AdminMenuHolder playerActions(UUID playerId, int returnPage) {
@@ -52,7 +69,7 @@ public final class AdminMenuHolder implements InventoryHolder {
 
     public static AdminMenuHolder playerActions(UUID playerId, int returnPage, String expectedTeam) {
         return new AdminMenuHolder(MenuType.PLAYER_ACTIONS, returnPage,
-                Objects.requireNonNull(playerId, "playerId").toString(), null, Map.of(), expectedTeam);
+                Objects.requireNonNull(playerId, "playerId").toString(), null, Map.of(), expectedTeam, null);
     }
 
     public static AdminMenuHolder confirmation(ConfirmationAction action, String target, int returnPage) {
@@ -66,7 +83,20 @@ public final class AdminMenuHolder implements InventoryHolder {
             int returnPage
     ) {
         return new AdminMenuHolder(MenuType.CONFIRMATION, returnPage, target,
-                Objects.requireNonNull(action, "action"), Map.of(), expectedState);
+                Objects.requireNonNull(action, "action"), Map.of(), expectedState,
+                action == ConfirmationAction.DELETE_TELEPORT_POINT ? SpawnRole.SURVIVOR : null);
+    }
+
+    public static AdminMenuHolder confirmation(
+            ConfirmationAction action,
+            String target,
+            String expectedState,
+            int returnPage,
+            SpawnRole spawnRole
+    ) {
+        return new AdminMenuHolder(MenuType.CONFIRMATION, returnPage, target,
+                Objects.requireNonNull(action, "action"), Map.of(), expectedState,
+                Objects.requireNonNull(spawnRole, "spawnRole"));
     }
 
     void bind(Inventory inventory) {
@@ -100,6 +130,10 @@ public final class AdminMenuHolder implements InventoryHolder {
         return expectedState;
     }
 
+    public SpawnRole spawnRole() {
+        return spawnRole;
+    }
+
     @Override
     public @NotNull Inventory getInventory() {
         return Objects.requireNonNull(inventory, "Menu inventory has not been created yet.");
@@ -108,6 +142,7 @@ public final class AdminMenuHolder implements InventoryHolder {
     public enum MenuType {
         MAIN,
         LIVE_STATUS,
+        TELEPORT_ROLES,
         TELEPORT_POINTS,
         SETUP_STATUS,
         PLAYERS,

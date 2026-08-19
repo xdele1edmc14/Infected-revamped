@@ -35,9 +35,17 @@ messages:
   all-survivals: "&4All zombies left the game! Restarting..."
   already-running: "&cThe game is already running!"
   config-reloaded: "&aInfected plugin configuration reloaded!"
+  round-abandoned: "&eThe Infected round was abandoned because a team left the event."
+  unsafe-infected-respawn: "&cNo safe dedicated infected respawn is available. The round has been cancelled."
+  infected-admission-teleport-failed: "&cThe infected player could not be teleported safely. The round has been cancelled."
 
 infected-spawn:
 
-# Teleport points for survivors & infected | Wouldn't recommend changing these unless you know what you're doing.
-# Use /addteleport and /removeteleport to modify these in-game.
+# Legacy shared points are copied once into each role below and retained for rollback.
 teleports:
+
+# Independent arena spawns used after the infected holding phase.
+spawns:
+  survivor:
+  infected-release:
+  infected-respawn:

@@ -14,6 +14,10 @@ public final class AdminGuiLayout {
     public static final int QUICK_HELP = 34;
     public static final int MAIN_CLOSE = 35;
 
+    public static final int SURVIVOR_SPAWNS = 20;
+    public static final int INFECTED_RELEASE_SPAWNS = 22;
+    public static final int INFECTED_RESPAWN_SPAWNS = 24;
+
     public static final int BACK = 45;
     public static final int PREVIOUS_PAGE = 46;
     public static final int CLOSE = 49;

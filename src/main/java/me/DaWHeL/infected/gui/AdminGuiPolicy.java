@@ -1,5 +1,7 @@
 package me.DaWHeL.infected.gui;
 
+import me.DaWHeL.infected.RoundPhase;
+
 import java.util.Objects;
 
 public final class AdminGuiPolicy {
@@ -8,6 +10,12 @@ public final class AdminGuiPolicy {
 
     public static boolean canStart(AdminSetupService.SetupSnapshot snapshot, boolean gameRunning) {
         return !gameRunning && snapshot.ready();
+    }
+
+    public static boolean canStop(RoundPhase phase) {
+        return phase == RoundPhase.COUNTDOWN
+                || phase == RoundPhase.HEADSTART
+                || phase == RoundPhase.ACTIVE;
     }
 
     public static int pageCount(int itemCount, int pageSize) {

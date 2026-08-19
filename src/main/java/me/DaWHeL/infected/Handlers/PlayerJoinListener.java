@@ -1,35 +1,36 @@
 package me.DaWHeL.infected.Handlers;
 
 import me.DaWHeL.infected.GameManager;
-import me.DaWHeL.infected.InfectedPlugin;
-import me.DaWHeL.infected.Roles.Infected;
+import me.DaWHeL.infected.RoundPhase;
 import org.bukkit.ChatColor;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerJoinEvent;
 
-public class PlayerJoinListener implements Listener {
+import java.util.Objects;
 
+public final class PlayerJoinListener implements Listener {
     private final GameManager gameManager;
-    private final InfectedPlugin plugin;
 
-    public PlayerJoinListener(InfectedPlugin plugin, GameManager gameManager) {
-        this.plugin = plugin;
-        this.gameManager = gameManager;
+    public PlayerJoinListener(GameManager gameManager) {
+        this.gameManager = Objects.requireNonNull(gameManager, "gameManager");
     }
 
     @EventHandler
     public void onPlayerJoin(PlayerJoinEvent event) {
         Player player = event.getPlayer();
-
-        // Only assign if game is NOT running
-        if (!gameManager.isGameRunning()) {
-            gameManager.resetPlayer(player);
-            player.sendMessage(ChatColor.GREEN + "You joined as a Survivor!");
-        } else {
-            gameManager.addInfected(new Infected(plugin, player, false));
-            player.sendMessage(ChatColor.GREEN + "You joined as an Infected");
+        RoundPhase phase = gameManager.getPhase();
+        if (phase == RoundPhase.LOBBY) {
+            gameManager.resetPlayerState(player);
+            gameManager.registerLobbySurvivor(player);
+            player.sendMessage(ChatColor.GREEN + "You joined as a survivor!");
+            return;
         }
+        if (phase == RoundPhase.ENDING) {
+            player.sendMessage(ChatColor.YELLOW + "The Infected round is resetting. You will join the lobby shortly.");
+            return;
+        }
+        gameManager.queueLateJoin(player);
     }
 }
