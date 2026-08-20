@@ -179,6 +179,12 @@ public class GameManager {
         return player != null && queuedPlayers.contains(player.getUniqueId());
     }
 
+    public boolean isRoundParticipant(Player player) {
+        return player != null
+                && phase != RoundPhase.LOBBY
+                && roundParticipants.containsKey(player.getUniqueId());
+    }
+
     public long currentRoundId() {
         return roundId;
     }

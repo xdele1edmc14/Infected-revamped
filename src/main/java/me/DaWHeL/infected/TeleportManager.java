@@ -1,8 +1,6 @@
 package me.DaWHeL.infected;
 
 import org.bukkit.Location;
-import org.bukkit.Material;
-import org.bukkit.World;
 import org.bukkit.entity.Player;
 import org.bukkit.scheduler.BukkitTask;
 
@@ -16,7 +14,6 @@ import java.util.function.BiConsumer;
 import java.util.function.Predicate;
 
 public class TeleportManager {
-    private final InfectedPlugin plugin;
     private final SpawnRepository spawnRepository;
     private final PluginTaskScheduler scheduler;
 
@@ -33,54 +30,24 @@ public class TeleportManager {
             SpawnRepository spawnRepository,
             PluginTaskScheduler scheduler
     ) {
-        this.plugin = Objects.requireNonNull(plugin, "plugin");
+        Objects.requireNonNull(plugin, "plugin");
         this.spawnRepository = Objects.requireNonNull(spawnRepository, "spawnRepository");
         this.scheduler = Objects.requireNonNull(scheduler, "scheduler");
     }
 
     public void addTeleportPoint(Player player, String name) {
         Location location = player.getLocation();
-        World world = location.getWorld();
-        if (world == null) {
+        if (location.getWorld() == null) {
             player.sendMessage("Teleport point could not be saved because its world is unavailable.");
             return;
-        }
-
-        int half = 2;
-        for (int x = -half; x <= half; x++) {
-            for (int z = -half; z <= half; z++) {
-                Material blockType = (x == 0 && z == 0) ? Material.IRON_BLOCK : Material.GOLD_BLOCK;
-                world.getBlockAt(location.getBlockX() + x, location.getBlockY(), location.getBlockZ() + z)
-                        .setType(blockType);
-            }
         }
 
         spawnRepository.savePoint(SpawnRole.SURVIVOR, name, location);
         player.sendMessage("Survivor spawn " + name + " added!");
     }
 
-    public void removeTeleportPoint(String name) {
-        SpawnRepository.NamedSpawn stored = spawnRepository.points(SpawnRole.SURVIVOR).stream()
-                .filter(point -> point.name().equals(name))
-                .findFirst()
-                .orElse(null);
-        if (stored == null) {
-            return;
-        }
-
-        World world = plugin.getServer().getWorld(stored.location().world());
-        if (world != null) {
-            int centerX = (int) Math.floor(stored.location().x());
-            int centerY = (int) Math.floor(stored.location().y());
-            int centerZ = (int) Math.floor(stored.location().z());
-            int half = 2;
-            for (int dx = -half; dx <= half; dx++) {
-                for (int dz = -half; dz <= half; dz++) {
-                    world.getBlockAt(centerX + dx, centerY, centerZ + dz).setType(Material.AIR);
-                }
-            }
-        }
-        spawnRepository.deletePoint(SpawnRole.SURVIVOR, name);
+    public boolean removeTeleportPoint(String name) {
+        return spawnRepository.deletePoint(SpawnRole.SURVIVOR, name);
     }
 
     public List<Location> getTeleportPoints() {

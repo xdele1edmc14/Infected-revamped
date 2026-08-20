@@ -73,7 +73,7 @@ public final class InfectedPlugin extends JavaPlugin {
         //Register Events
         Bukkit.getPluginManager().registerEvents(new ParticipantDamageListener(gameManager), this);
         Bukkit.getPluginManager().registerEvents(new InfectedContainmentListener(gameManager), this);
-        Bukkit.getPluginManager().registerEvents(new HungerListener(), this);
+        Bukkit.getPluginManager().registerEvents(new HungerListener(gameManager), this);
         getServer().getPluginManager().registerEvents(new PlayerJoinListener(gameManager), this);
         getServer().getPluginManager().registerEvents(new PlayerQuitListener(gameManager), this);
         getServer().getPluginManager().registerEvents(new InfectedInventoryLockListener(gameManager), this);

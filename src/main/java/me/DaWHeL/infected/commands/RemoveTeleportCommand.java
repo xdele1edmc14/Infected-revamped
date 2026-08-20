@@ -22,8 +22,11 @@ public class RemoveTeleportCommand implements CommandExecutor {
         }
 
         String name = args[0];
-        teleportManager.removeTeleportPoint(name);
-        sender.sendMessage("Teleport point " + name + " removed!");
+        if (teleportManager.removeTeleportPoint(name)) {
+            sender.sendMessage("Teleport point " + name + " removed!");
+        } else {
+            sender.sendMessage("Teleport point " + name + " was not found.");
+        }
         return true;
     }
 }
