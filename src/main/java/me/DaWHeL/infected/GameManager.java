@@ -857,7 +857,7 @@ public class GameManager {
             return Optional.empty();
         }
         playerSnapshots.remove(playerId, snapshot);
-        if (phase == RoundPhase.LOBBY && player.isOnline() && !player.isDead()) {
+        if (phase == RoundPhase.LOBBY && player.isOnline()) {
             upsertSurvivor(player);
         }
         return Optional.ofNullable(restoration.location());

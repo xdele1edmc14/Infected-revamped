@@ -1164,6 +1164,25 @@ class GameManagerLifecycleTest {
     }
 
     @Test
+    void playerWhoseDeathEndsRoundCanJoinTheImmediateNextRoundAfterRespawn() {
+        startActiveRound(2, 1);
+        Player deadPlayer = gameManager.getSurvivors().getFirst().getPlayer();
+        Player otherPlayer = gameManager.getInfected().getFirst().getPlayer();
+        org.mockito.Mockito.doReturn(List.of(deadPlayer, otherPlayer)).when(server).getOnlinePlayers();
+        when(deadPlayer.isDead()).thenReturn(true);
+
+        assertTrue(gameManager.handlePlayerDeath(deadPlayer));
+        repeatingTasks.getLast().run();
+        assertEquals(RoundPhase.LOBBY, gameManager.getPhase());
+
+        assertTrue(gameManager.restoreAfterRoundRespawn(deadPlayer).isPresent());
+        when(deadPlayer.isDead()).thenReturn(false);
+
+        StartResult nextRound = gameManager.startGame();
+        assertTrue(nextRound.success(), () -> String.join("; ", nextRound.errors()));
+    }
+
+    @Test
     void preActiveInfectedDeathQueuesHoldingRespawnWithoutConsumingALife() {
         configureValidSetup(2, 1);
         addLobbyPlayer("pre-active-first");
