@@ -44,6 +44,10 @@ public final class ParticipantDamageListener implements Listener {
             return;
         }
         Player attacker = resolved.get();
+        if (!gameManager.isRoundParticipant(attacker)
+                || !gameManager.isRoundParticipant(victim)) {
+            return;
+        }
         ParticipantRole attackerRole = gameManager.roleOf(attacker);
         ParticipantRole victimRole = gameManager.roleOf(victim);
         boolean directPlayerMelee = isDirectPlayerMelee(event, attacker);

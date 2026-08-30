@@ -8,9 +8,15 @@ import java.util.Objects;
 
 public final class BukkitParticipantRoleFactory implements ParticipantRoleFactory {
     private final InfectedPlugin plugin;
+    private final InfectedRoleEquipment roleEquipment;
 
     public BukkitParticipantRoleFactory(InfectedPlugin plugin) {
+        this(plugin, new InfectedRoleEquipment(plugin));
+    }
+
+    BukkitParticipantRoleFactory(InfectedPlugin plugin, InfectedRoleEquipment roleEquipment) {
         this.plugin = Objects.requireNonNull(plugin, "plugin");
+        this.roleEquipment = Objects.requireNonNull(roleEquipment, "roleEquipment");
     }
 
     @Override
@@ -20,6 +26,6 @@ public final class BukkitParticipantRoleFactory implements ParticipantRoleFactor
 
     @Override
     public Infected createInfected(Player player) {
-        return new Infected(plugin, player, false);
+        return new Infected(plugin, player, false, roleEquipment);
     }
 }

@@ -139,6 +139,28 @@ class SpawnRepositoryTest {
         );
     }
 
+    @Test
+    void excludesLocationsWithMissingOrNonnumericCoordinates() {
+        config.set("spawns.survivor.missing-y.world", "arena");
+        config.set("spawns.survivor.missing-y.x", 1);
+        config.set("spawns.survivor.missing-y.z", 2);
+        config.set("spawns.survivor.text.world", "arena");
+        config.set("spawns.survivor.text.x", "not-a-number");
+        config.set("spawns.survivor.text.y", 64);
+        config.set("spawns.survivor.text.z", 2);
+
+        assertTrue(repository.points(SpawnRole.SURVIVOR).isEmpty());
+    }
+
+    @Test
+    void excludesLocationsWithNonFiniteCoordinates() {
+        setStored("spawns.infected-respawn.nan", "arena", Double.NaN, 64, 2, 0, 0);
+        setStored("spawns.infected-respawn.infinity", "arena", 1,
+                Double.POSITIVE_INFINITY, 2, 0, 0);
+
+        assertTrue(repository.points(SpawnRole.INFECTED_RESPAWN).isEmpty());
+    }
+
     private void setStored(String path, String world, double x, double y, double z, double yaw, double pitch) {
         config.set(path + ".world", world);
         config.set(path + ".x", x);

@@ -21,8 +21,13 @@ public class ScoreboardManager {
     }
 
     public void updateScoreboard() {
+        if (!gameManager.getPhase().queuesLateJoins()) {
+            return;
+        }
         for (Player player : Bukkit.getOnlinePlayers()) {
-            applyScoreboard(player);
+            if (gameManager.isRoundParticipant(player) || gameManager.isQueued(player)) {
+                applyScoreboard(player);
+            }
         }
     }
 
@@ -41,12 +46,16 @@ public class ScoreboardManager {
         int survivorCount = gameManager.getSurvivors().size();
 
         int score = lines.size();
+        int lineIndex = 0;
         for (String line : lines) {
             String formatted = line
                     .replace("{infected}", String.valueOf(infectedCount))
                     .replace("{survivors}", String.valueOf(survivorCount));
-            objective.getScore(ChatColor.translateAlternateColorCodes('&', formatted)).setScore(score);
+            String visible = ChatColor.translateAlternateColorCodes('&', formatted);
+            String uniqueEntry = visible + ChatColor.COLOR_CHAR + Integer.toHexString(lineIndex % 16);
+            objective.getScore(uniqueEntry).setScore(score);
             score--;
+            lineIndex++;
         }
 
         player.setScoreboard(scoreboard);
@@ -56,4 +65,3 @@ public class ScoreboardManager {
         player.setScoreboard(Bukkit.getScoreboardManager().getNewScoreboard());
     }
 }
-

@@ -29,8 +29,9 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.doAnswer;
-import static org.mockito.Mockito.doNothing;
+import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -47,13 +48,34 @@ class GameManagerCleanupTest {
         TeleportManager teleports = mock(TeleportManager.class);
         PluginTaskScheduler scheduler = mock(PluginTaskScheduler.class);
         ParticipantRoleFactory roleFactory = mock(ParticipantRoleFactory.class);
+        InfectedRoleEquipment roleEquipment = mock(InfectedRoleEquipment.class);
         when(plugin.getServer()).thenReturn(server);
         when(plugin.getConfig()).thenReturn(config);
         config.set("settings.starting-zombies", 1);
         config.set("settings.teleport-batch-size", 2);
         config.set("settings.teleport-delay", 40);
         config.set("settings.infected-teleport-delay", 0);
-        Location location = new Location(mock(World.class), 0, 64, 0);
+        config.set("settings.minimum-players", 2);
+        config.set("settings.start-countdown-seconds", 0);
+        config.set("settings.round-time-limit-seconds", 0);
+        World arena = mock(World.class);
+        org.bukkit.WorldBorder border = mock(org.bukkit.WorldBorder.class);
+        org.bukkit.block.Block ground = mock(org.bukkit.block.Block.class);
+        org.bukkit.block.Block air = mock(org.bukkit.block.Block.class);
+        Location location = new Location(arena, 0.5, 64, 0.5);
+        when(arena.getWorldBorder()).thenReturn(border);
+        when(border.isInside(any(Location.class))).thenReturn(true);
+        when(arena.getMinHeight()).thenReturn(-64);
+        when(arena.getMaxHeight()).thenReturn(320);
+        when(arena.getBlockAt(0, 63, 0)).thenReturn(ground);
+        when(arena.getBlockAt(0, 64, 0)).thenReturn(air);
+        when(arena.getBlockAt(0, 65, 0)).thenReturn(air);
+        when(ground.getType()).thenReturn(org.bukkit.Material.STONE);
+        when(ground.isPassable()).thenReturn(false);
+        when(ground.getBoundingBox()).thenReturn(
+                new org.bukkit.util.BoundingBox(0, 63, 0, 1, 64, 1));
+        when(air.getType()).thenReturn(org.bukkit.Material.AIR);
+        when(air.isPassable()).thenReturn(true);
         when(repository.loadedHoldingSpawn()).thenReturn(Optional.of(location));
         for (SpawnRole role : SpawnRole.values()) {
             when(repository.loadedLocations(role)).thenReturn(List.of(location));
@@ -82,7 +104,10 @@ class GameManagerCleanupTest {
                 scheduler,
                 new RoundStartValidator(),
                 new Random(1),
-                roleFactory
+                roleFactory,
+                mock(InfectedBuffController.class),
+                mock(MatchPresentationService.class),
+                roleEquipment
         ));
         when(roleFactory.createInfected(any(Player.class))).thenAnswer(invocation -> {
             me.DaWHeL.infected.Roles.Infected role = mock(me.DaWHeL.infected.Roles.Infected.class);
@@ -91,7 +116,6 @@ class GameManagerCleanupTest {
         });
         when(roleFactory.createSurvivor(any(Player.class))).thenAnswer(invocation -> survivor(
                 invocation.getArgument(0)));
-        doNothing().when(manager).resetPlayerState(any(Player.class));
         Player first = player("first");
         AtomicBoolean secondOnline = new AtomicBoolean(true);
         Player second = player("second", secondOnline);
@@ -108,6 +132,7 @@ class GameManagerCleanupTest {
         manager.getSurvivors().add(survivor(first));
         manager.getSurvivors().add(survivor(second));
         int rosterSizeBeforeStop = manager.getSurvivors().size() + manager.getInfected().size();
+        clearInvocations(manager, first, second, third, queued);
 
         assertTrue(manager.stopGame());
         assertFalse(manager.stopGame());
@@ -116,19 +141,25 @@ class GameManagerCleanupTest {
         ArgumentCaptor<Runnable> cleanup = ArgumentCaptor.forClass(Runnable.class);
         verify(scheduler).runRepeating(cleanup.capture(), anyLong(), anyLong());
         secondOnline.set(false);
-        cleanup.getValue().run();
+        Runnable cleanupTask = cleanup.getValue();
+        cleanupTask.run();
         assertEquals(rosterSizeBeforeStop,
                 manager.getSurvivors().size() + manager.getInfected().size());
         secondOnline.set(true);
-        cleanup.getValue().run();
+        cleanupTask.run();
 
         assertEquals(RoundPhase.LOBBY, manager.getPhase());
         assertEquals(4, manager.getSurvivors().size());
         assertEquals(0, manager.getInfected().size());
-        verify(manager, times(1)).resetPlayerState(first);
-        verify(manager, times(1)).resetPlayerState(second);
-        verify(manager, times(1)).resetPlayerState(third);
-        verify(manager, times(1)).resetPlayerState(queued);
+        verify(first, times(1)).setFoodLevel(0);
+        verify(second, times(1)).setFoodLevel(0);
+        verify(third, times(1)).setFoodLevel(0);
+        verify(queued, times(1)).setFoodLevel(0);
+        verify(roleEquipment).removeOwnedHead(first);
+        verify(roleEquipment).removeOwnedHead(second);
+        verify(roleEquipment).removeOwnedHead(third);
+        verify(roleEquipment).removeOwnedHead(queued);
+        verify(manager, never()).resetPlayerState(any(Player.class));
         verify(roleFactory, times(1)).createSurvivor(queued);
     }
 
@@ -143,6 +174,11 @@ class GameManagerCleanupTest {
         when(player.isOnline()).thenAnswer(invocation -> online.get());
         when(player.teleport(any(Location.class))).thenReturn(true);
         when(player.getInventory()).thenReturn(mock(PlayerInventory.class));
+        World world = mock(World.class);
+        when(world.getUID()).thenReturn(UUID.nameUUIDFromBytes((name + "-world").getBytes()));
+        when(world.getSpawnLocation()).thenReturn(new Location(world, 0.5, 64, 0.5));
+        when(player.getWorld()).thenReturn(world);
+        when(player.getLocation()).thenReturn(new Location(world, 1.5, 70, 1.5));
         when(player.getActivePotionEffects()).thenReturn(Set.of());
         return player;
     }

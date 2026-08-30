@@ -28,6 +28,7 @@ class AdminGuiPolicyTest {
         assertAll(
                 () -> assertFalse(AdminGuiPolicy.canStop(RoundPhase.LOBBY)),
                 () -> assertTrue(AdminGuiPolicy.canStop(RoundPhase.COUNTDOWN)),
+                () -> assertTrue(AdminGuiPolicy.canStop(RoundPhase.DEPLOYING)),
                 () -> assertTrue(AdminGuiPolicy.canStop(RoundPhase.HEADSTART)),
                 () -> assertTrue(AdminGuiPolicy.canStop(RoundPhase.ACTIVE)),
                 () -> assertFalse(AdminGuiPolicy.canStop(RoundPhase.ENDING))

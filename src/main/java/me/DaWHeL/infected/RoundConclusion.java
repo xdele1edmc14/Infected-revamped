@@ -4,5 +4,6 @@ public enum RoundConclusion {
     NONE,
     SURVIVORS_WIN,
     INFECTED_WIN,
+    ABANDONED,
     CANCELLED
 }

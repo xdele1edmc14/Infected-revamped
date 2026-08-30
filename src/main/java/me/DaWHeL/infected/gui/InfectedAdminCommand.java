@@ -1,7 +1,7 @@
 package me.DaWHeL.infected.gui;
 
-import me.DaWHeL.infected.GameManager;
 import me.DaWHeL.infected.SpawnRole;
+import me.DaWHeL.infected.admin.AdminActionService;
 import org.bukkit.ChatColor;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
@@ -16,18 +16,16 @@ import java.util.Locale;
 import java.util.Objects;
 
 public final class InfectedAdminCommand implements CommandExecutor, TabCompleter {
-    private static final String ADMIN_PERMISSION = "infected.admin";
-
-    private final GameManager gameManager;
+    private final AdminActionService actions;
     private final AdminSetupService setupService;
     private final AdminGuiNavigator navigator;
 
     public InfectedAdminCommand(
-            GameManager gameManager,
+            AdminActionService actions,
             AdminSetupService setupService,
             AdminGuiNavigator navigator
     ) {
-        this.gameManager = Objects.requireNonNull(gameManager, "gameManager");
+        this.actions = Objects.requireNonNull(actions, "actions");
         this.setupService = Objects.requireNonNull(setupService, "setupService");
         this.navigator = Objects.requireNonNull(navigator, "navigator");
     }
@@ -39,18 +37,48 @@ public final class InfectedAdminCommand implements CommandExecutor, TabCompleter
             @NotNull String label,
             @NotNull String[] args
     ) {
-        if (!(sender instanceof Player player)) {
-            showConsoleStatus(sender);
-            return true;
-        }
-
-        if (!player.hasPermission(ADMIN_PERMISSION)) {
-            player.sendMessage(ChatColor.RED + "You do not have permission to use the Infected admin controls.");
+        if (!sender.hasPermission(AdminActionService.ADMIN_PERMISSION)) {
+            sender.sendMessage(ChatColor.RED + "You do not have permission to use the Infected admin controls.");
             return true;
         }
 
         if (args.length == 0) {
-            navigator.openMain(player);
+            if (sender instanceof Player player) {
+                navigator.openMain(player);
+            } else {
+                actions.status(sender);
+                actions.help(sender);
+            }
+            return true;
+        }
+
+        switch (args[0].toLowerCase(Locale.ROOT)) {
+            case "start" -> {
+                actions.start(sender);
+                return true;
+            }
+            case "stop" -> {
+                actions.stop(sender);
+                return true;
+            }
+            case "reload" -> {
+                actions.reload(sender);
+                return true;
+            }
+            case "status" -> {
+                actions.status(sender);
+                return true;
+            }
+            case "help" -> {
+                actions.help(sender);
+                return true;
+            }
+            default -> {
+            }
+        }
+
+        if (!(sender instanceof Player player)) {
+            actions.help(sender);
             return true;
         }
 
@@ -72,12 +100,17 @@ public final class InfectedAdminCommand implements CommandExecutor, TabCompleter
                     });
         }
 
-        player.sendMessage(ChatColor.YELLOW
-                + "Usage: /infected gui addteleport [survivor|release|respawn] <name>");
+        player.sendMessage(ChatColor.YELLOW + "Usage: /infected <start|stop|reload|status|help>"
+                + " or /infected gui addteleport [survivor|release|respawn] <name>");
         return true;
     }
 
     private boolean addTeleportPoint(Player player, SpawnRole role, String name, boolean survivorShorthand) {
+        if (!actions.setupChangesAllowed()) {
+            player.sendMessage(ChatColor.RED
+                    + "Spawn setup can only be changed while the event is in the lobby.");
+            return true;
+        }
         try {
             AdminSetupService.validatePointName(name);
             if (survivorShorthand) {
@@ -100,20 +133,6 @@ public final class InfectedAdminCommand implements CommandExecutor, TabCompleter
         return true;
     }
 
-    private void showConsoleStatus(CommandSender sender) {
-        int survivors = gameManager.getSurvivors().size();
-        int infected = gameManager.getInfected().size();
-        AdminSetupService.SetupSnapshot snapshot = setupService.snapshot(survivors, infected);
-
-        sender.sendMessage(ChatColor.GOLD + "Infected Event Control");
-        sender.sendMessage(ChatColor.GRAY + "State: " + ChatColor.YELLOW + gameManager.getPhase().name());
-        sender.sendMessage(ChatColor.GRAY + "Survivors: " + survivors + " | Infected: " + infected);
-        sender.sendMessage(ChatColor.GRAY + "Setup: "
-                + (snapshot.ready() ? ChatColor.GREEN + "Ready" : ChatColor.RED + "Incomplete"));
-        sender.sendMessage(ChatColor.AQUA + "/infected" + ChatColor.GRAY
-                + " opens the control desk in-game. Add points with /infected gui addteleport <name>.");
-    }
-
     @Override
     public @Nullable List<String> onTabComplete(
             @NotNull CommandSender sender,
@@ -121,11 +140,14 @@ public final class InfectedAdminCommand implements CommandExecutor, TabCompleter
             @NotNull String alias,
             @NotNull String[] args
     ) {
-        if (sender instanceof Player player && !player.hasPermission(ADMIN_PERMISSION)) {
+        if (!sender.hasPermission(AdminActionService.ADMIN_PERMISSION)) {
             return List.of();
         }
         if (args.length == 1) {
-            return matching("gui", args[0]);
+            String input = args[0].toLowerCase(Locale.ROOT);
+            return List.of("start", "stop", "reload", "status", "help", "gui").stream()
+                    .filter(candidate -> candidate.startsWith(input))
+                    .toList();
         }
         if (args.length == 2 && args[0].equalsIgnoreCase("gui")) {
             return matching("addteleport", args[1]);

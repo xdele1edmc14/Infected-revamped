@@ -45,6 +45,8 @@ public final class InfectedRespawnSelector {
         List<Location> randomized = new ArrayList<>(candidates);
         Collections.shuffle(randomized, random);
         return randomized.stream()
+                .filter(Objects::nonNull)
+                .map(InfectedRespawnSelector::centered)
                 .filter(InfectedRespawnSelector::isSafe)
                 .findFirst()
                 .map(Location::clone);
@@ -59,6 +61,13 @@ public final class InfectedRespawnSelector {
         } catch (IllegalArgumentException exception) {
             return false;
         }
+    }
+
+    private static Location centered(Location location) {
+        Location centered = location.clone();
+        centered.setX(location.getBlockX() + 0.5);
+        centered.setZ(location.getBlockZ() + 0.5);
+        return centered;
     }
 
     private static boolean isSafeLoadedLocation(Location location) {

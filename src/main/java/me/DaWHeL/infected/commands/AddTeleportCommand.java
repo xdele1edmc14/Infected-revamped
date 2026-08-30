@@ -1,6 +1,8 @@
 package me.DaWHeL.infected.commands;
 
 import me.DaWHeL.infected.InfectedPlugin;
+import me.DaWHeL.infected.GameManager;
+import me.DaWHeL.infected.RoundPhase;
 import me.DaWHeL.infected.TeleportManager;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
@@ -10,9 +12,15 @@ import org.bukkit.entity.Player;
 public class AddTeleportCommand implements CommandExecutor {
 
     private final TeleportManager teleportManager;
+    private final GameManager gameManager;
 
     public AddTeleportCommand(InfectedPlugin plugin) {
-        this.teleportManager = plugin.getTeleportManager();
+        this(plugin.getTeleportManager(), plugin.getGameManager());
+    }
+
+    AddTeleportCommand(TeleportManager teleportManager, GameManager gameManager) {
+        this.teleportManager = java.util.Objects.requireNonNull(teleportManager, "teleportManager");
+        this.gameManager = java.util.Objects.requireNonNull(gameManager, "gameManager");
     }
 
     @Override
@@ -24,6 +32,10 @@ public class AddTeleportCommand implements CommandExecutor {
 
         if (args.length != 1) {
             player.sendMessage("Usage: /addteleport <name>");
+            return true;
+        }
+        if (gameManager.getPhase() != RoundPhase.LOBBY) {
+            player.sendMessage("Spawn setup can only be changed while the event is in the lobby.");
             return true;
         }
 

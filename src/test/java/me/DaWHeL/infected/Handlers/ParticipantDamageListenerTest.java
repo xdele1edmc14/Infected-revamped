@@ -27,6 +27,24 @@ class ParticipantDamageListenerTest {
         listener = new ParticipantDamageListener(gameManager);
         attacker = mock(Player.class);
         victim = mock(Player.class);
+        when(gameManager.isRoundParticipant(attacker)).thenReturn(true);
+        when(gameManager.isRoundParticipant(victim)).thenReturn(true);
+    }
+
+    @Test
+    void leavesLobbyPvpUntouchedForPlayersWhoAreNotCurrentParticipants() {
+        EntityDamageByEntityEvent event = event(
+                attacker, EntityDamageEvent.DamageCause.ENTITY_ATTACK, false);
+        when(gameManager.getPhase()).thenReturn(RoundPhase.LOBBY);
+        when(gameManager.roleOf(attacker)).thenReturn(ParticipantRole.SURVIVOR);
+        when(gameManager.roleOf(victim)).thenReturn(ParticipantRole.SURVIVOR);
+        when(gameManager.isRoundParticipant(attacker)).thenReturn(false);
+        when(gameManager.isRoundParticipant(victim)).thenReturn(false);
+
+        listener.onParticipantDamage(event);
+
+        verify(event, never()).setCancelled(true);
+        verify(gameManager, never()).infectPlayer(victim, true);
     }
 
     @Test

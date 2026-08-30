@@ -23,6 +23,8 @@ import java.util.logging.Logger;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.doReturn;
@@ -92,6 +94,7 @@ class PlayerStateSnapshotTest {
         when(player.getFoodLevel()).thenReturn(17);
         when(player.getSaturation()).thenReturn(3.5f);
         when(player.getExhaustion()).thenReturn(1.25f);
+        when(player.teleport(any(Location.class))).thenReturn(true);
 
         PlayerStateSnapshot snapshot = PlayerStateSnapshot.capture(player);
 
@@ -100,7 +103,7 @@ class PlayerStateSnapshotTest {
         capturedLocation.setX(999);
         compassTarget.setZ(999);
 
-        snapshot.restore(player);
+        assertTrue(snapshot.restore(player));
 
         ArgumentCaptor<ItemStack[]> restoredStorage = ArgumentCaptor.forClass(ItemStack[].class);
         ArgumentCaptor<ItemStack[]> restoredArmor = ArgumentCaptor.forClass(ItemStack[].class);
@@ -159,8 +162,9 @@ class PlayerStateSnapshotTest {
         when(currentWorld.getSpawnLocation()).thenReturn(fallback);
         doReturn(List.of()).when(player).getActivePotionEffects();
         when(player.getCompassTarget()).thenReturn(new Location(capturedWorld, 1, 2, 3));
+        when(player.teleport(any(Location.class))).thenReturn(true);
 
-        PlayerStateSnapshot.capture(player).restore(player);
+        assertTrue(PlayerStateSnapshot.capture(player).restore(player));
 
         verify(player).teleport(fallback);
         verify(player).setGameMode(GameMode.SURVIVAL);
@@ -194,12 +198,43 @@ class PlayerStateSnapshotTest {
         Level previousLevel = logger.getLevel();
         logger.setLevel(Level.OFF);
         try {
-            assertDoesNotThrow(() -> snapshot.restore(player));
+            assertFalse(assertDoesNotThrow(() -> snapshot.restore(player)));
         } finally {
             logger.setLevel(previousLevel);
         }
 
         verify(player).setGameMode(GameMode.ADVENTURE);
         verify(player).teleport(any(Location.class));
+    }
+
+    @Test
+    void reportsFailureWhenTheRestorationTeleportIsCancelled() {
+        Player player = restorablePlayer();
+        when(player.teleport(any(Location.class))).thenReturn(false);
+
+        PlayerStateSnapshot snapshot = PlayerStateSnapshot.capture(player);
+
+        assertFalse(snapshot.restore(player));
+    }
+
+    private static Player restorablePlayer() {
+        Player player = mock(Player.class);
+        PlayerInventory inventory = mock(PlayerInventory.class);
+        Server server = mock(Server.class);
+        World world = mock(World.class);
+        UUID worldId = UUID.randomUUID();
+        Location location = new Location(world, 2, 70, 3);
+        when(player.getInventory()).thenReturn(inventory);
+        when(inventory.getStorageContents()).thenReturn(new ItemStack[0]);
+        when(inventory.getArmorContents()).thenReturn(new ItemStack[0]);
+        when(player.getLocation()).thenReturn(location);
+        when(world.getUID()).thenReturn(worldId);
+        when(player.getServer()).thenReturn(server);
+        when(server.getWorld(worldId)).thenReturn(world);
+        when(player.getWorld()).thenReturn(world);
+        when(player.getGameMode()).thenReturn(GameMode.SURVIVAL);
+        when(player.getActivePotionEffects()).thenReturn(List.of());
+        when(player.getCompassTarget()).thenReturn(location);
+        return player;
     }
 }

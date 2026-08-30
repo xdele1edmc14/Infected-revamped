@@ -5,23 +5,20 @@ import me.DaWHeL.infected.Roles.Survivor;
 import org.bukkit.ChatColor;
 import org.bukkit.GameMode;
 import org.bukkit.Location;
-import org.bukkit.Material;
 import org.bukkit.entity.Player;
-import org.bukkit.inventory.ItemStack;
-import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.potion.PotionEffect;
-import org.bukkit.potion.PotionEffectType;
 import org.bukkit.scheduler.BukkitTask;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.EnumSet;
-import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Random;
 import java.util.Set;
 import java.util.UUID;
@@ -34,6 +31,9 @@ public class GameManager {
     private final RoundStartValidator startValidator;
     private final Random random;
     private final ParticipantRoleFactory roleFactory;
+    private final InfectedBuffController buffController;
+    private final MatchPresentationService presentation;
+    private final InfectedRoleEquipment roleEquipment;
     private final List<Survivor> survivors = new ArrayList<>();
     private final List<Infected> infected = new ArrayList<>();
     private final InfectedLifeTracker infectedLives = new InfectedLifeTracker();
@@ -42,13 +42,17 @@ public class GameManager {
     private final Set<UUID> containedInfected = new LinkedHashSet<>();
     private final Set<UUID> queuedPlayers = new LinkedHashSet<>();
     private final Set<UUID> roundTeleportBypass = new LinkedHashSet<>();
-    private final Set<BukkitTask> roundTasks = new LinkedHashSet<>();
-    private final Map<UUID, Long> featherCooldown = new HashMap<>();
+    private final Set<UUID> pendingInfectedRespawns = new LinkedHashSet<>();
+    private final Set<UUID> pendingHoldingRespawns = new LinkedHashSet<>();
+    private final Map<UUID, Player> lockedParticipants = new LinkedHashMap<>();
+    private final Map<UUID, PlayerStateSnapshot> playerSnapshots = new LinkedHashMap<>();
+    private final RoundTaskRegistry taskRegistry = new RoundTaskRegistry();
 
     private RoundPhase phase = RoundPhase.LOBBY;
     private boolean buffEnabled;
     private long roundId;
     private BukkitTask cleanupTask;
+    private BukkitTask infectedTrackingTask;
 
     public GameManager(InfectedPlugin plugin) {
         this(
@@ -58,7 +62,10 @@ public class GameManager {
                 new BukkitPluginTaskScheduler(plugin),
                 new RoundStartValidator(),
                 new Random(),
-                new BukkitParticipantRoleFactory(plugin)
+                new BukkitParticipantRoleFactory(plugin),
+                new InfectedBuffController(plugin),
+                new MatchPresentationService(plugin),
+                new InfectedRoleEquipment(plugin)
         );
     }
 
@@ -71,7 +78,8 @@ public class GameManager {
             Random random
     ) {
         this(plugin, spawnRepository, teleportManager, scheduler, startValidator, random,
-                new BukkitParticipantRoleFactory(plugin));
+                new BukkitParticipantRoleFactory(plugin), new InfectedBuffController(plugin),
+                new MatchPresentationService(plugin), new InfectedRoleEquipment(plugin));
     }
 
     GameManager(
@@ -83,6 +91,53 @@ public class GameManager {
             Random random,
             ParticipantRoleFactory roleFactory
     ) {
+        this(plugin, spawnRepository, teleportManager, scheduler, startValidator, random,
+                roleFactory, new InfectedBuffController(plugin), new MatchPresentationService(plugin),
+                new InfectedRoleEquipment(plugin));
+    }
+
+    GameManager(
+            InfectedPlugin plugin,
+            SpawnRepository spawnRepository,
+            TeleportManager teleportManager,
+            PluginTaskScheduler scheduler,
+            RoundStartValidator startValidator,
+            Random random,
+            ParticipantRoleFactory roleFactory,
+            InfectedBuffController buffController
+    ) {
+        this(plugin, spawnRepository, teleportManager, scheduler, startValidator, random,
+                roleFactory, buffController, new MatchPresentationService(plugin),
+                new InfectedRoleEquipment(plugin));
+    }
+
+    GameManager(
+            InfectedPlugin plugin,
+            SpawnRepository spawnRepository,
+            TeleportManager teleportManager,
+            PluginTaskScheduler scheduler,
+            RoundStartValidator startValidator,
+            Random random,
+            ParticipantRoleFactory roleFactory,
+            InfectedBuffController buffController,
+            MatchPresentationService presentation
+    ) {
+        this(plugin, spawnRepository, teleportManager, scheduler, startValidator, random,
+                roleFactory, buffController, presentation, new InfectedRoleEquipment(plugin));
+    }
+
+    GameManager(
+            InfectedPlugin plugin,
+            SpawnRepository spawnRepository,
+            TeleportManager teleportManager,
+            PluginTaskScheduler scheduler,
+            RoundStartValidator startValidator,
+            Random random,
+            ParticipantRoleFactory roleFactory,
+            InfectedBuffController buffController,
+            MatchPresentationService presentation,
+            InfectedRoleEquipment roleEquipment
+    ) {
         this.plugin = Objects.requireNonNull(plugin, "plugin");
         this.spawnRepository = Objects.requireNonNull(spawnRepository, "spawnRepository");
         this.teleportManager = Objects.requireNonNull(teleportManager, "teleportManager");
@@ -90,6 +145,9 @@ public class GameManager {
         this.startValidator = Objects.requireNonNull(startValidator, "startValidator");
         this.random = Objects.requireNonNull(random, "random");
         this.roleFactory = Objects.requireNonNull(roleFactory, "roleFactory");
+        this.buffController = Objects.requireNonNull(buffController, "buffController");
+        this.presentation = Objects.requireNonNull(presentation, "presentation");
+        this.roleEquipment = Objects.requireNonNull(roleEquipment, "roleEquipment");
         this.scoreboardManager = new ScoreboardManager(plugin, this);
     }
 
@@ -121,10 +179,6 @@ public class GameManager {
         return buffEnabled;
     }
 
-    public void setBuffEnabled(boolean buffEnabled) {
-        this.buffEnabled = buffEnabled;
-    }
-
     public void addSurvivor(Survivor survivor) {
         Objects.requireNonNull(survivor, "survivor");
         Player player = survivor.getPlayer();
@@ -136,11 +190,25 @@ public class GameManager {
     }
 
     public boolean registerLobbySurvivor(Player player) {
-        if (phase != RoundPhase.LOBBY || player == null || !player.isOnline()) {
+        if (phase != RoundPhase.LOBBY || player == null || !player.isOnline() || player.isDead()) {
             return false;
         }
+        restoreSnapshot(player);
         upsertSurvivor(player);
         return true;
+    }
+
+    public void registerOnlineLobbySurvivors(Collection<? extends Player> onlinePlayers) {
+        if (phase != RoundPhase.LOBBY || onlinePlayers == null) {
+            return;
+        }
+        LinkedHashMap<UUID, Player> unique = new LinkedHashMap<>();
+        for (Player player : onlinePlayers) {
+            if (player != null && player.isOnline() && !player.isDead()) {
+                unique.putIfAbsent(player.getUniqueId(), player);
+            }
+        }
+        unique.values().forEach(this::registerLobbySurvivor);
     }
 
     public void addInfected(Infected infectedPlayer) {
@@ -152,6 +220,9 @@ public class GameManager {
         infected.add(infectedPlayer);
         infectedLives.register(player.getUniqueId(), getConfiguredInfectedLives());
         roundParticipants.put(player.getUniqueId(), player);
+        if (phase == RoundPhase.ACTIVE) {
+            buffController.apply(player, buffEnabled);
+        }
     }
 
     public ParticipantRole roleOf(Player player) {
@@ -205,17 +276,91 @@ public class GameManager {
         }
 
         long startedRound = ++roundId;
-        transitionTo(RoundPhase.COUNTDOWN);
-        cancelRoundTasks();
+        taskRegistry.resetForNewRound();
+        buffEnabled = false;
+        infectedTrackingTask = null;
         infected.clear();
         infectedLives.clear();
         queuedPlayers.clear();
         containedInfected.clear();
         roundTeleportBypass.clear();
+        pendingInfectedRespawns.clear();
+        pendingHoldingRespawns.clear();
         roundParticipants.clear();
-        participants.forEach(player -> roundParticipants.put(player.getUniqueId(), player));
+        lockedParticipants.clear();
+        Set<UUID> capturedForThisStart = new LinkedHashSet<>();
+        try {
+            for (Player player : participants) {
+                UUID playerId = player.getUniqueId();
+                lockedParticipants.put(playerId, player);
+                roundParticipants.put(playerId, player);
+                if (!playerSnapshots.containsKey(playerId)) {
+                    playerSnapshots.put(playerId, PlayerStateSnapshot.capture(player));
+                    capturedForThisStart.add(playerId);
+                }
+            }
+        } catch (RuntimeException exception) {
+            restoreCapturedPlayers(capturedForThisStart);
+            lockedParticipants.clear();
+            roundParticipants.clear();
+            taskRegistry.cancelAll();
+            return StartResult.rejected("A participant's pre-match state could not be saved.");
+        }
 
-        survivors.removeIf(survivor -> !roundParticipants.containsKey(survivor.getPlayer().getUniqueId()));
+        transitionTo(RoundPhase.COUNTDOWN);
+        int countdownSeconds = plugin.getConfig().getInt("settings.start-countdown-seconds", 10);
+        if (countdownSeconds == 0) {
+            return beginDeployment(startedRound);
+        }
+        broadcastCountdown(countdownSeconds);
+        int[] remainingSeconds = {countdownSeconds};
+        BukkitTask[] countdownHandle = new BukkitTask[1];
+        Runnable countdownTick = () -> {
+            if (!isCurrentRound(startedRound, RoundPhase.COUNTDOWN)) {
+                cancelAndForget(countdownHandle[0]);
+                return;
+            }
+            remainingSeconds[0]--;
+            if (remainingSeconds[0] <= 0) {
+                cancelAndForget(countdownHandle[0]);
+                beginDeployment(startedRound);
+                return;
+            }
+            if (remainingSeconds[0] == 10 || remainingSeconds[0] <= 5) {
+                broadcastCountdown(remainingSeconds[0]);
+            }
+        };
+        countdownHandle[0] = scheduler.runRepeating(countdownTick, 20L, 20L);
+        trackRoundTask(countdownHandle[0]);
+        return StartResult.started();
+    }
+
+    private StartResult beginDeployment(long expectedRound) {
+        if (!isCurrentRound(expectedRound, RoundPhase.COUNTDOWN)) {
+            return StartResult.rejected("The countdown is no longer current.");
+        }
+
+        List<Player> participants = lockedParticipants.values().stream()
+                .filter(Player::isOnline)
+                .toList();
+        RoundStartValidator.Result validation = validateStart(participants);
+        if (!validation.valid()) {
+            beginEnding(EndReason.START_FAILURE,
+                    plugin.getConfig().getString(
+                            "messages.countdown-cancelled",
+                            "&cThe Infected countdown was cancelled because the round is no longer ready."
+                    ));
+            return StartResult.rejected(validation.errors());
+        }
+        transitionTo(RoundPhase.DEPLOYING);
+        presentation.deployment(participants);
+        Set<UUID> deployingIds = participants.stream()
+                .map(Player::getUniqueId)
+                .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+        roundParticipants.keySet().retainAll(deployingIds);
+        lockedParticipants.keySet().retainAll(deployingIds);
+        survivors.removeIf(survivor -> !deployingIds.contains(survivor.getPlayer().getUniqueId()));
+
         List<Player> shuffled = new ArrayList<>(participants);
         Collections.shuffle(shuffled, random);
         int startingInfected = plugin.getConfig().getInt("settings.starting-zombies", 5);
@@ -238,27 +383,32 @@ public class GameManager {
                 "&eThe Infected game has started with &c{zombies} &ezombies!"
         ).replace("{zombies}", String.valueOf(startingInfected)));
 
+        survivors.forEach(Survivor::prepareForMatch);
         List<Player> survivorPlayers = survivors.stream()
                 .map(Survivor::getPlayer)
                 .filter(Player::isOnline)
                 .toList();
         int batchSize = plugin.getConfig().getInt("settings.teleport-batch-size", 5);
         long delayTicks = plugin.getConfig().getLong("settings.teleport-delay", 40L);
-        BukkitTask task = teleportManager.teleportPlayersBatch(
+        BukkitTask[] taskHandle = new BukkitTask[1];
+        taskHandle[0] = teleportManager.teleportPlayersBatch(
                 SpawnRole.SURVIVOR,
                 survivorPlayers,
                 batchSize,
                 delayTicks,
-                player -> isCurrentParticipant(player, ParticipantRole.SURVIVOR, startedRound,
-                        RoundPhase.COUNTDOWN),
-                result -> onSurvivorsTeleported(startedRound, result)
+                player -> isCurrentParticipant(player, ParticipantRole.SURVIVOR, expectedRound,
+                        RoundPhase.DEPLOYING),
+                result -> {
+                    taskRegistry.forget(taskHandle[0]);
+                    onSurvivorsTeleported(expectedRound, result);
+                }
         );
-        trackRoundTask(task);
+        trackRoundTask(taskHandle[0]);
         return StartResult.started();
     }
 
     private void onSurvivorsTeleported(long expectedRound, TeleportBatchResult result) {
-        if (!isCurrentRound(expectedRound, RoundPhase.COUNTDOWN)) {
+        if (!isCurrentRound(expectedRound, RoundPhase.DEPLOYING)) {
             return;
         }
         if (!result.success()) {
@@ -290,7 +440,8 @@ public class GameManager {
                 .toList();
         int batchSize = plugin.getConfig().getInt("settings.teleport-batch-size", 5);
         long delayTicks = plugin.getConfig().getLong("settings.teleport-delay", 40L);
-        BukkitTask task = teleportManager.teleportPlayersBatch(
+        BukkitTask[] taskHandle = new BukkitTask[1];
+        taskHandle[0] = teleportManager.teleportPlayersBatch(
                 SpawnRole.INFECTED_RELEASE,
                 infectedPlayers,
                 batchSize,
@@ -301,9 +452,12 @@ public class GameManager {
                 (player, teleported) -> {
                     roundTeleportBypass.remove(player.getUniqueId());
                 },
-                result -> onInfectedReleased(expectedRound, result)
+                result -> {
+                    taskRegistry.forget(taskHandle[0]);
+                    onInfectedReleased(expectedRound, result);
+                }
         );
-        trackRoundTask(task);
+        trackRoundTask(taskHandle[0]);
     }
 
     private void onInfectedReleased(long expectedRound, TeleportBatchResult result) {
@@ -319,7 +473,38 @@ public class GameManager {
 
         containedInfected.clear();
         transitionTo(RoundPhase.ACTIVE);
+        presentation.active(
+                survivors.stream().map(Survivor::getPlayer).filter(Player::isOnline).toList(),
+                infected.stream().map(Infected::getPlayer).filter(Player::isOnline).toList(),
+                queuedPlayers.stream()
+                        .map(plugin.getServer()::getPlayer)
+                        .filter(Objects::nonNull)
+                        .filter(Player::isOnline)
+                        .toList()
+        );
+        scheduleRoundExpiry(expectedRound);
         checkWin();
+    }
+
+    private void scheduleRoundExpiry(long expectedRound) {
+        int timeLimitSeconds = plugin.getConfig().getInt("settings.round-time-limit-seconds", 0);
+        if (timeLimitSeconds <= 0) {
+            return;
+        }
+
+        BukkitTask[] expiryHandle = new BukkitTask[1];
+        Runnable expiry = () -> {
+            taskRegistry.forget(expiryHandle[0]);
+            if (isCurrentRound(expectedRound, RoundPhase.ACTIVE) && !survivors.isEmpty()) {
+                broadcast(plugin.getConfig().getString(
+                        "messages.round-expired",
+                        "&eTime expired. The remaining survivors win!"
+                ));
+                applyConclusion(RoundConclusion.SURVIVORS_WIN);
+            }
+        };
+        expiryHandle[0] = scheduler.runLater(expiry, timeLimitSeconds * 20L);
+        trackRoundTask(expiryHandle[0]);
     }
 
     public boolean stopGame() {
@@ -344,9 +529,10 @@ public class GameManager {
         transitionTo(RoundPhase.ENDING);
         roundId++;
         cancelRoundTasks();
+        buffEnabled = false;
+        infectedTrackingTask = null;
         containedInfected.clear();
         roundTeleportBypass.clear();
-        featherCooldown.clear();
 
         if (reason == EndReason.ADMIN_STOP) {
             broadcast(plugin.getConfig().getString(
@@ -374,18 +560,20 @@ public class GameManager {
         Runnable cleanupOperation = () -> {
             for (Player player : queue.nextBatch(batchSize)) {
                 if (player.isOnline() && processed.add(player.getUniqueId())) {
-                    resetPlayerState(player);
+                    restoreSnapshot(player);
                 }
             }
             if (queue.isComplete()) {
                 if (taskHandle[0] != null) {
                     taskHandle[0].cancel();
+                    taskRegistry.forget(taskHandle[0]);
                 }
                 cleanupTask = null;
                 finishCleanup(processed);
             }
         };
         cleanupTask = scheduler.runRepeating(cleanupOperation, 0L, period);
+        taskRegistry.trackCleanup(cleanupTask);
         taskHandle[0] = cleanupTask;
         return true;
     }
@@ -394,14 +582,17 @@ public class GameManager {
         survivors.clear();
         infected.clear();
         roundParticipants.clear();
+        lockedParticipants.clear();
         queuedPlayers.clear();
         infectedLives.clear();
+        pendingInfectedRespawns.clear();
+        pendingHoldingRespawns.clear();
         for (Player player : plugin.getServer().getOnlinePlayers()) {
-            if (processed.add(player.getUniqueId()) && player.isOnline()) {
-                resetPlayerState(player);
-            }
             if (player.isOnline()) {
-                upsertSurvivor(player);
+                restoreSnapshot(player);
+                if (!playerSnapshots.containsKey(player.getUniqueId())) {
+                    upsertSurvivor(player);
+                }
             }
         }
         transitionTo(RoundPhase.LOBBY);
@@ -452,12 +643,15 @@ public class GameManager {
     }
 
     public RoundActionResult toggleZombieSafely(Player player) {
-        if (phase != RoundPhase.ACTIVE) {
+        if (!phase.allowsZombieToggle()) {
             return RoundActionResult.rejected(
                     "Zombie toggles are only allowed during active play.");
         }
         if (player == null || !player.isOnline()) {
             return RoundActionResult.rejected("The target player must be online.");
+        }
+        if (player.isDead()) {
+            return RoundActionResult.rejected("The target player must be alive before changing teams.");
         }
 
         ParticipantRole role = roleOf(player);
@@ -469,7 +663,8 @@ public class GameManager {
             infected.removeIf(entry -> samePlayer(entry.getPlayer(), player));
             infectedLives.remove(player.getUniqueId());
             clearInfectedRoleState(player);
-            upsertSurvivor(player);
+            Survivor survivor = upsertSurvivor(player);
+            survivor.prepareForMatch();
             roundParticipants.put(player.getUniqueId(), player);
             return RoundActionResult.accepted(player.getName() + " is now a survivor.");
         }
@@ -525,16 +720,23 @@ public class GameManager {
     }
 
     public boolean queueLateJoin(Player player) {
-        if (player == null || phase == RoundPhase.LOBBY || phase == RoundPhase.ENDING) {
+        if (player == null || !phase.queuesLateJoins()) {
+            return false;
+        }
+        UUID playerId = player.getUniqueId();
+        try {
+            playerSnapshots.computeIfAbsent(playerId, ignored -> PlayerStateSnapshot.capture(player));
+        } catch (RuntimeException exception) {
             return false;
         }
         survivors.removeIf(entry -> samePlayer(entry.getPlayer(), player));
         infected.removeIf(entry -> samePlayer(entry.getPlayer(), player));
-        infectedLives.remove(player.getUniqueId());
-        roundParticipants.remove(player.getUniqueId());
-        containedInfected.remove(player.getUniqueId());
-        roundTeleportBypass.remove(player.getUniqueId());
-        queuedPlayers.add(player.getUniqueId());
+        infectedLives.remove(playerId);
+        roundParticipants.remove(playerId);
+        lockedParticipants.remove(playerId);
+        containedInfected.remove(playerId);
+        roundTeleportBypass.remove(playerId);
+        queuedPlayers.add(playerId);
         player.setGameMode(GameMode.SPECTATOR);
         player.sendMessage(ChatColor.YELLOW
                 + "A round is already running. You are queued as a spectator for the next round.");
@@ -547,23 +749,25 @@ public class GameManager {
     }
 
     public void handleQuit(Player player) {
+        restoreSnapshot(player);
         ParticipantRole departedRole = removeRoundMembership(player);
         applyDepartureOutcome(departedRole);
     }
 
     public RoundActionResult removePlayer(Player player) {
-        if (phase == RoundPhase.LOBBY || phase == RoundPhase.ENDING) {
+        if (!phase.allowsParticipantRemoval()) {
             return RoundActionResult.rejected(
-                    "Players can only be removed during countdown, head start, or active play.");
+                    "Players can only be removed during countdown, deployment, head start, or active play.");
         }
         ParticipantRole role = roleOf(player);
         boolean queued = isQueued(player);
-        if (role == ParticipantRole.NONE && !queued) {
+        if (role == ParticipantRole.NONE && !queued
+                && !roundParticipants.containsKey(player.getUniqueId())) {
             return RoundActionResult.rejected("That player is not part of this round or its queue.");
         }
 
         ParticipantRole departedRole = removeRoundMembership(player);
-        resetPlayerState(player);
+        restoreSnapshot(player);
         applyDepartureOutcome(departedRole);
         return RoundActionResult.accepted(player.getName() + " was removed from the round.");
     }
@@ -583,15 +787,43 @@ public class GameManager {
         infectedLives.remove(player.getUniqueId());
         queuedPlayers.remove(player.getUniqueId());
         roundParticipants.remove(player.getUniqueId());
+        lockedParticipants.remove(player.getUniqueId());
         containedInfected.remove(player.getUniqueId());
         roundTeleportBypass.remove(player.getUniqueId());
-        featherCooldown.remove(player.getUniqueId());
+        pendingInfectedRespawns.remove(player.getUniqueId());
+        pendingHoldingRespawns.remove(player.getUniqueId());
         return departedRole;
+    }
+
+    public boolean handlePlayerDeath(Player player) {
+        if (player == null || !roundParticipants.containsKey(player.getUniqueId())) {
+            return false;
+        }
+        ParticipantRole role = roleOf(player);
+        if (phase == RoundPhase.ACTIVE && role == ParticipantRole.SURVIVOR) {
+            if (pendingInfectedRespawns.add(player.getUniqueId())) {
+                infectPlayer(player, true);
+            }
+            return true;
+        }
+        if (phase == RoundPhase.ACTIVE && role == ParticipantRole.INFECTED) {
+            handleInfectedDeath(player);
+            return true;
+        }
+        if ((phase == RoundPhase.DEPLOYING || phase == RoundPhase.HEADSTART)
+                && role == ParticipantRole.INFECTED) {
+            pendingHoldingRespawns.add(player.getUniqueId());
+            return true;
+        }
+        return false;
     }
 
     public boolean handleInfectedDeath(Player player) {
         if (phase != RoundPhase.ACTIVE || roleOf(player) != ParticipantRole.INFECTED) {
             return false;
+        }
+        if (!pendingInfectedRespawns.add(player.getUniqueId())) {
+            return true;
         }
         boolean hasRemainingLife = infectedLives.consumeLife(player.getUniqueId());
         if (!hasRemainingLife) {
@@ -602,17 +834,77 @@ public class GameManager {
         return hasRemainingLife;
     }
 
+    public Optional<Location> restoreAfterRoundRespawn(Player player) {
+        if (player == null) {
+            return Optional.empty();
+        }
+        UUID playerId = player.getUniqueId();
+        boolean cleanupRestore = phase == RoundPhase.ENDING || phase == RoundPhase.LOBBY;
+        boolean removedParticipantRestore = phase != RoundPhase.ENDING
+                && phase != RoundPhase.LOBBY
+                && !roundParticipants.containsKey(playerId);
+        if (!cleanupRestore && !removedParticipantRestore) {
+            return Optional.empty();
+        }
+
+        PlayerStateSnapshot snapshot = playerSnapshots.get(playerId);
+        if (snapshot == null) {
+            return Optional.empty();
+        }
+        roleEquipment.removeOwnedHead(player);
+        PlayerStateSnapshot.RespawnRestoration restoration = snapshot.restoreForRespawn(player);
+        if (!restoration.success()) {
+            return Optional.empty();
+        }
+        playerSnapshots.remove(playerId, snapshot);
+        if (phase == RoundPhase.LOBBY && player.isOnline() && !player.isDead()) {
+            upsertSurvivor(player);
+        }
+        return Optional.ofNullable(restoration.location());
+    }
+
+    public boolean claimInfectedRespawn(Player player) {
+        return player != null && pendingInfectedRespawns.remove(player.getUniqueId());
+    }
+
+    public boolean claimHoldingRespawn(Player player) {
+        return player != null && pendingHoldingRespawns.remove(player.getUniqueId());
+    }
+
     public boolean isEliminatedInfected(Player player) {
         return infectedLives.isEliminated(player.getUniqueId());
     }
 
-    public void checkWin() {
+    public RoundActionResult toggleInfectedBuff() {
         if (phase != RoundPhase.ACTIVE) {
-            return;
+            return RoundActionResult.rejected("Infected buffs can only be changed during active play.");
         }
-        if (survivors.isEmpty() && infected.isEmpty()) {
-            applyConclusion(RoundConclusion.CANCELLED);
+
+        buffEnabled = !buffEnabled;
+        for (Infected infectedRole : List.copyOf(infected)) {
+            buffController.apply(infectedRole.getPlayer(), buffEnabled);
         }
+        if (buffEnabled) {
+            startInfectedTracking();
+        } else {
+            stopInfectedTracking();
+        }
+        return RoundActionResult.accepted(buffEnabled
+                ? "Infected buffs enabled."
+                : "Infected buffs disabled.");
+    }
+
+    public void applyCurrentInfectedBuff(Player player) {
+        if (phase != RoundPhase.LOBBY
+                && phase != RoundPhase.ENDING
+                && roleOf(player) == ParticipantRole.INFECTED) {
+            buffController.apply(player, phase == RoundPhase.ACTIVE && buffEnabled);
+        }
+    }
+
+    public void checkWin() {
+        applyConclusion(RoundOutcomePolicy.evaluate(
+                phase, survivors.size(), infected.size()));
     }
 
     private void announceWinner(RoundWinner winner) {
@@ -631,7 +923,16 @@ public class GameManager {
                 : "entity.wither.spawn";
 
         broadcast(plugin.getConfig().getString(messagePath + ".chat", defaultChat));
+        LinkedHashMap<UUID, Player> recipients = new LinkedHashMap<>(roundParticipants);
         for (Player player : plugin.getServer().getOnlinePlayers()) {
+            if (queuedPlayers.contains(player.getUniqueId())) {
+                recipients.putIfAbsent(player.getUniqueId(), player);
+            }
+        }
+        for (Player player : recipients.values()) {
+            if (!player.isOnline()) {
+                continue;
+            }
             player.sendTitle(
                     color(plugin.getConfig().getString(messagePath + ".title", defaultTitle)),
                     color(plugin.getConfig().getString(messagePath + ".subtitle", defaultSubtitle)),
@@ -644,65 +945,141 @@ public class GameManager {
         beginEnding(EndReason.WINNER, null);
     }
 
-    public void startFeatherTask() {
-        scheduler.runRepeating(() -> {
-            if (phase != RoundPhase.ACTIVE) {
+    public BukkitTask scheduleRoundLater(
+            Player player,
+            RoundPhase requiredPhase,
+            long delayTicks,
+            Runnable operation
+    ) {
+        Objects.requireNonNull(requiredPhase, "requiredPhase");
+        Objects.requireNonNull(operation, "operation");
+        if (player == null
+                || phase != requiredPhase
+                || !roundParticipants.containsKey(player.getUniqueId())) {
+            return null;
+        }
+        long expectedRound = roundId;
+        BukkitTask[] handle = new BukkitTask[1];
+        Runnable guarded = () -> {
+            taskRegistry.forget(handle[0]);
+            if (expectedRound == roundId
+                    && phase == requiredPhase
+                    && roundParticipants.containsKey(player.getUniqueId())) {
+                operation.run();
+            }
+        };
+        handle[0] = scheduler.runLater(guarded, Math.max(0L, delayTicks));
+        trackRoundTask(handle[0]);
+        return handle[0];
+    }
+
+    public BukkitTask scheduleCleanupLater(Player player, long delayTicks, Runnable operation) {
+        Objects.requireNonNull(operation, "operation");
+        if (player == null
+                || phase != RoundPhase.ENDING
+                || !roundParticipants.containsKey(player.getUniqueId())) {
+            return null;
+        }
+        long expectedRound = roundId;
+        BukkitTask[] handle = new BukkitTask[1];
+        Runnable guarded = () -> {
+            taskRegistry.forget(handle[0]);
+            if (expectedRound == roundId
+                    && phase == RoundPhase.ENDING
+                    && roundParticipants.containsKey(player.getUniqueId())) {
+                operation.run();
+            }
+        };
+        handle[0] = scheduler.runLater(guarded, Math.max(0L, delayTicks));
+        taskRegistry.trackCleanup(handle[0]);
+        return handle[0];
+    }
+
+    private void startInfectedTracking() {
+        if (phase != RoundPhase.ACTIVE || !buffEnabled || infectedTrackingTask != null) {
+            return;
+        }
+        long expectedRound = roundId;
+        infectedTrackingTask = scheduler.runRepeating(() -> {
+            if (roundId != expectedRound || phase != RoundPhase.ACTIVE || !buffEnabled) {
                 return;
             }
-            for (Player player : plugin.getServer().getOnlinePlayers()) {
-                if (roleOf(player) == ParticipantRole.NONE) {
-                    continue;
+            List<Survivor> currentSurvivors = List.copyOf(survivors);
+            for (Infected infectedRole : List.copyOf(infected)) {
+                Player infectedPlayer = infectedRole.getPlayer();
+                Player nearest = nearestSurvivor(infectedPlayer, currentSurvivors);
+                if (nearest != null) {
+                    infectedPlayer.setCompassTarget(nearest.getLocation());
                 }
-                UUID uuid = player.getUniqueId();
-                if (player.getInventory().contains(Material.FEATHER) || featherCooldown.containsKey(uuid)) {
-                    continue;
-                }
-                ItemStack feather = new ItemStack(Material.FEATHER);
-                ItemMeta meta = feather.getItemMeta();
-                meta.setDisplayName("§bJump Feather");
-                meta.setLore(List.of("§eUse this if you're stuck!", "§eLaunches you high into the air."));
-                feather.setItemMeta(meta);
-                player.getInventory().addItem(feather);
             }
         }, 0L, 20L);
+        trackRoundTask(infectedTrackingTask);
     }
 
-    public void setFeatherCooldown(Player player, int seconds) {
-        featherCooldown.put(player.getUniqueId(), System.currentTimeMillis() + seconds * 1000L);
-        BukkitTask task = scheduler.runLater(
-                () -> featherCooldown.remove(player.getUniqueId()),
-                seconds * 20L
-        );
-        trackRoundTask(task);
+    private void stopInfectedTracking() {
+        cancelAndForget(infectedTrackingTask);
+        infectedTrackingTask = null;
     }
 
-    public boolean isOnFeatherCooldown(Player player) {
-        Long expiry = featherCooldown.get(player.getUniqueId());
-        return expiry != null && System.currentTimeMillis() < expiry;
+    private Player nearestSurvivor(Player infectedPlayer, List<Survivor> candidates) {
+        Player nearest = null;
+        double minimumDistance = Double.MAX_VALUE;
+        for (Survivor survivor : candidates) {
+            Player candidate = survivor.getPlayer();
+            if (candidate.getWorld() != infectedPlayer.getWorld()) {
+                continue;
+            }
+            double distance = infectedPlayer.getLocation().distance(candidate.getLocation());
+            if (distance < minimumDistance) {
+                minimumDistance = distance;
+                nearest = candidate;
+            }
+        }
+        return nearest;
     }
 
     public void shutdown() {
         roundId++;
-        cancelRoundTasks();
+        taskRegistry.cancelAll();
         if (cleanupTask != null) {
             cleanupTask.cancel();
             cleanupTask = null;
         }
+        LinkedHashMap<UUID, Player> playersToRestore = new LinkedHashMap<>(lockedParticipants);
+        playersToRestore.putAll(roundParticipants);
+        for (Player player : plugin.getServer().getOnlinePlayers()) {
+            if (playerSnapshots.containsKey(player.getUniqueId())) {
+                playersToRestore.putIfAbsent(player.getUniqueId(), player);
+            }
+        }
+        for (Player player : playersToRestore.values()) {
+            if (player.isOnline()) {
+                restoreSnapshotImmediately(player);
+            }
+        }
         survivors.clear();
         infected.clear();
         roundParticipants.clear();
+        lockedParticipants.clear();
         queuedPlayers.clear();
         containedInfected.clear();
         roundTeleportBypass.clear();
         infectedLives.clear();
-        featherCooldown.clear();
+        pendingInfectedRespawns.clear();
+        pendingHoldingRespawns.clear();
+        buffEnabled = false;
+        infectedTrackingTask = null;
         phase = RoundPhase.LOBBY;
     }
 
     private RoundStartValidator.Result validateStart(List<Player> participants) {
         EnumSet<SpawnRole> loadedRoles = EnumSet.noneOf(SpawnRole.class);
         for (SpawnRole role : SpawnRole.values()) {
-            if (!spawnRepository.loadedLocations(role).isEmpty()) {
+            List<Location> locations = spawnRepository.loadedLocations(role);
+            boolean available = role == SpawnRole.INFECTED_RESPAWN
+                    ? locations.stream().anyMatch(InfectedRespawnSelector::isSafe)
+                    : !locations.isEmpty();
+            if (available) {
                 loadedRoles.add(role);
             }
         }
@@ -713,7 +1090,10 @@ public class GameManager {
                 plugin.getConfig().getInt("settings.starting-zombies", 5),
                 plugin.getConfig().getInt("settings.teleport-batch-size", 5),
                 plugin.getConfig().getInt("settings.teleport-delay", 40),
-                plugin.getConfig().getInt("settings.infected-teleport-delay", 10)
+                plugin.getConfig().getInt("settings.infected-teleport-delay", 10),
+                plugin.getConfig().getInt("settings.minimum-players", 2),
+                plugin.getConfig().getInt("settings.start-countdown-seconds", 10),
+                plugin.getConfig().getInt("settings.round-time-limit-seconds", 0)
         ));
     }
 
@@ -725,30 +1105,28 @@ public class GameManager {
                 unique.put(player.getUniqueId(), player);
             }
         }
-        return List.copyOf(unique.values());
+        return unique.values().stream().filter(player -> !player.isDead()).toList();
     }
 
     private void assignInfected(Player player) {
         addInfected(roleFactory.createInfected(player));
     }
 
-    private void upsertSurvivor(Player player) {
+    private Survivor upsertSurvivor(Player player) {
         infected.removeIf(existing -> samePlayer(existing.getPlayer(), player));
         infectedLives.remove(player.getUniqueId());
         queuedPlayers.remove(player.getUniqueId());
         survivors.removeIf(existing -> samePlayer(existing.getPlayer(), player));
-        survivors.add(roleFactory.createSurvivor(player));
+        Survivor survivor = roleFactory.createSurvivor(player);
+        survivors.add(survivor);
+        return survivor;
     }
 
     private void clearInfectedRoleState(Player player) {
+        buffController.clearRoleState(player);
+        roleEquipment.removeOwnedHead(player);
         player.setGlowing(false);
         player.setGameMode(GameMode.SURVIVAL);
-        player.getInventory().setHelmet(null);
-        player.removePotionEffect(PotionEffectType.SPEED);
-        player.removePotionEffect(PotionEffectType.RESISTANCE);
-        player.removePotionEffect(PotionEffectType.BLINDNESS);
-        player.removePotionEffect(PotionEffectType.SLOWNESS);
-        player.removePotionEffect(PotionEffectType.NAUSEA);
     }
 
     private boolean teleportWithContainmentBypass(Player player, Location destination) {
@@ -776,6 +1154,14 @@ public class GameManager {
     }
 
     private void applyDepartureOutcome(ParticipantRole departedRole) {
+        if (phase == RoundPhase.COUNTDOWN) {
+            int minimumPlayers = plugin.getConfig().getInt("settings.minimum-players", 2);
+            if (lockedParticipants.values().stream().filter(Player::isOnline).count()
+                    < minimumPlayers) {
+                applyConclusion(RoundConclusion.ABANDONED);
+            }
+            return;
+        }
         RosterChange change = switch (departedRole) {
             case SURVIVOR -> RosterChange.SURVIVOR_DEPARTURE;
             case INFECTED -> RosterChange.INFECTED_DEPARTURE;
@@ -793,11 +1179,18 @@ public class GameManager {
             }
             case SURVIVORS_WIN -> announceWinner(RoundWinner.SURVIVORS);
             case INFECTED_WIN -> announceWinner(RoundWinner.INFECTED);
-            case CANCELLED -> beginEnding(
+            case ABANDONED -> beginEnding(
                     EndReason.ABANDONMENT,
                     plugin.getConfig().getString(
                             "messages.round-abandoned",
                             "&eThe Infected round was abandoned because a team left the event."
+                    )
+            );
+            case CANCELLED -> beginEnding(
+                    EndReason.CANCELLATION,
+                    plugin.getConfig().getString(
+                            "messages.round-cancelled",
+                            "&cThe Infected round was cancelled."
                     )
             );
         }
@@ -812,15 +1205,67 @@ public class GameManager {
 
     private void trackRoundTask(BukkitTask task) {
         if (task != null && phase != RoundPhase.LOBBY && phase != RoundPhase.ENDING) {
-            roundTasks.add(task);
+            taskRegistry.trackGameplay(task);
         }
     }
 
     private void cancelRoundTasks() {
-        for (BukkitTask task : roundTasks) {
+        taskRegistry.cancelGameplay();
+    }
+
+    private void cancelAndForget(BukkitTask task) {
+        if (task != null) {
             task.cancel();
+            taskRegistry.forget(task);
         }
-        roundTasks.clear();
+    }
+
+    private void broadcastCountdown(int seconds) {
+        presentation.countdown(
+                lockedParticipants.values().stream().filter(Player::isOnline).toList(),
+                seconds
+        );
+        broadcast(plugin.getConfig().getString(
+                "messages.countdown",
+                "&eThe Infected round starts in &c{time} &eseconds."
+        ).replace("{time}", String.valueOf(seconds)));
+    }
+
+    private void restoreCapturedPlayers(Set<UUID> capturedPlayerIds) {
+        for (UUID playerId : capturedPlayerIds) {
+            PlayerStateSnapshot snapshot = playerSnapshots.get(playerId);
+            Player player = lockedParticipants.get(playerId);
+            if (snapshot != null && player != null && player.isOnline()) {
+                roleEquipment.removeOwnedHead(player);
+                if (snapshot.restore(player)) {
+                    playerSnapshots.remove(playerId, snapshot);
+                }
+            }
+        }
+    }
+
+    private void restoreSnapshot(Player player) {
+        if (player == null) {
+            return;
+        }
+        if (player.isDead()) {
+            return;
+        }
+        restoreSnapshotImmediately(player);
+    }
+
+    private void restoreSnapshotImmediately(Player player) {
+        if (player == null) {
+            return;
+        }
+        UUID playerId = player.getUniqueId();
+        PlayerStateSnapshot snapshot = playerSnapshots.get(playerId);
+        if (snapshot != null) {
+            roleEquipment.removeOwnedHead(player);
+            if (snapshot.restore(player)) {
+                playerSnapshots.remove(playerId, snapshot);
+            }
+        }
     }
 
     private int getConfiguredInfectedLives() {
@@ -842,6 +1287,7 @@ public class GameManager {
     private enum EndReason {
         ADMIN_STOP,
         ABANDONMENT,
+        CANCELLATION,
         START_FAILURE,
         RESPAWN_FAILURE,
         WINNER

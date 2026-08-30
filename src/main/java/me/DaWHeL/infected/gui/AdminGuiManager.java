@@ -29,11 +29,18 @@ public final class AdminGuiManager implements AdminGuiNavigator, AdminGuiClickHa
     private final GameManager gameManager;
     private final AdminSetupService setupService;
     private final AdminEventActions eventActions;
+    private final SpawnCreationSessionManager spawnSessions;
 
-    public AdminGuiManager(InfectedPlugin plugin, GameManager gameManager, AdminSetupService setupService) {
+    public AdminGuiManager(
+            InfectedPlugin plugin,
+            GameManager gameManager,
+            AdminSetupService setupService,
+            SpawnCreationSessionManager spawnSessions
+    ) {
         this.plugin = Objects.requireNonNull(plugin, "plugin");
         this.gameManager = Objects.requireNonNull(gameManager, "gameManager");
         this.setupService = Objects.requireNonNull(setupService, "setupService");
+        this.spawnSessions = Objects.requireNonNull(spawnSessions, "spawnSessions");
         this.eventActions = new AdminEventActions(plugin, gameManager, setupService);
     }
 
@@ -238,9 +245,9 @@ public final class AdminGuiManager implements AdminGuiNavigator, AdminGuiClickHa
                 ChatColor.GREEN,
                 "Add Current Location",
                 ChatColor.GRAY + "Name the new " + role.displayName().toLowerCase(java.util.Locale.ROOT) + " point",
-                ChatColor.GRAY + "with a simple command.",
+                ChatColor.GRAY + "by typing its name in chat.",
                 "",
-                ChatColor.AQUA + "Click: " + ChatColor.GRAY + "Show command"
+                ChatColor.AQUA + "Click: " + ChatColor.GRAY + "Start chat naming"
         ));
         if (page + 1 < pages) {
             menu.setItem(AdminGuiLayout.NEXT_PAGE, AdminGuiItems.item(
@@ -432,6 +439,9 @@ public final class AdminGuiManager implements AdminGuiNavigator, AdminGuiClickHa
 
     private void handleSpawnClick(Player player, ClickType click) {
         if (click.isRightClick() && click.isShiftClick()) {
+            if (!allowSetupMutation(player)) {
+                return;
+            }
             if (setupService.infectedSpawn().isEmpty()) {
                 player.sendMessage(ChatColor.RED + "No infected spawn is configured.");
                 openMain(player);
@@ -447,6 +457,9 @@ public final class AdminGuiManager implements AdminGuiNavigator, AdminGuiClickHa
             return;
         }
         if (click.isLeftClick()) {
+            if (!allowSetupMutation(player)) {
+                return;
+            }
             setupService.setInfectedSpawn(player.getLocation());
             player.sendMessage(ChatColor.GREEN + "Infected spawn saved at your current location.");
             openMain(player);
@@ -490,10 +503,13 @@ public final class AdminGuiManager implements AdminGuiNavigator, AdminGuiClickHa
             return;
         }
         if (slot == AdminGuiLayout.CLOSE) {
-            player.closeInventory();
-            player.sendMessage(ChatColor.AQUA + "Type " + ChatColor.YELLOW
-                    + "/infected gui addteleport " + role.commandKey() + " <name>" + ChatColor.AQUA
-                    + " to save your current location without changing blocks.");
+            if (gameManager.getPhase() != RoundPhase.LOBBY) {
+                player.sendMessage(ChatColor.RED
+                        + "Spawn points can only be created while the event is in the lobby.");
+                openTeleportPoints(player, role, page);
+                return;
+            }
+            spawnSessions.begin(player, role, page);
             return;
         }
         if (slot == AdminGuiLayout.NEXT_PAGE) {
@@ -519,6 +535,9 @@ public final class AdminGuiManager implements AdminGuiNavigator, AdminGuiClickHa
         }
         AdminSetupService.TeleportPoint point = selected.get();
         if (click.isRightClick() && click.isShiftClick()) {
+            if (!allowSetupMutation(player)) {
+                return;
+            }
             openConfirmation(player, AdminMenuHolder.ConfirmationAction.DELETE_TELEPORT_POINT,
                     point.name(), stateKey(point.location()), page, role);
         } else if (click.isLeftClick()) {
@@ -652,6 +671,7 @@ public final class AdminGuiManager implements AdminGuiNavigator, AdminGuiClickHa
             openMain(player);
             return;
         }
+        spawnSessions.cancelAll();
         plugin.reloadConfig();
         String message = plugin.getConfig().getString("messages.config-reloaded",
                 "&aInfected plugin configuration reloaded!");
@@ -712,6 +732,7 @@ public final class AdminGuiManager implements AdminGuiNavigator, AdminGuiClickHa
                 AdminEventActions.ActionResult result = eventActions.start(player);
                 player.sendMessage((result.success() ? ChatColor.GREEN : ChatColor.RED) + result.message());
                 if (result.success()) {
+                    spawnSessions.cancelAll();
                     player.closeInventory();
                 } else {
                     openMain(player);
@@ -723,6 +744,9 @@ public final class AdminGuiManager implements AdminGuiNavigator, AdminGuiClickHa
                 player.closeInventory();
             }
             case CLEAR_INFECTED_SPAWN -> {
+                if (!allowSetupMutation(player)) {
+                    return;
+                }
                 String currentState = setupService.infectedSpawn().map(AdminGuiManager::stateKey).orElse(null);
                 if (!AdminGuiPolicy.matchesExpected(holder.expectedState(), currentState)) {
                     player.sendMessage(ChatColor.YELLOW
@@ -738,6 +762,9 @@ public final class AdminGuiManager implements AdminGuiNavigator, AdminGuiClickHa
                 openMain(player);
             }
             case DELETE_TELEPORT_POINT -> {
+                if (!allowSetupMutation(player)) {
+                    return;
+                }
                 String target = holder.target();
                 SpawnRole role = holder.spawnRole();
                 String currentState = target == null ? null : setupService.teleportPoints(role).stream()
@@ -771,6 +798,16 @@ public final class AdminGuiManager implements AdminGuiNavigator, AdminGuiClickHa
         }
     }
 
+    private boolean allowSetupMutation(Player player) {
+        if (gameManager.getPhase() == RoundPhase.LOBBY) {
+            return true;
+        }
+        player.sendMessage(ChatColor.RED
+                + "Spawn setup can only be changed while the event is in the lobby.");
+        openMain(player);
+        return false;
+    }
+
     private void teleportToSpawn(Player player) {
         Optional<AdminSetupService.StoredLocation> stored = setupService.infectedSpawn();
         if (stored.isEmpty()) {
@@ -778,7 +815,7 @@ public final class AdminGuiManager implements AdminGuiNavigator, AdminGuiClickHa
             openMain(player);
             return;
         }
-        Location location = resolve(stored.get(), false);
+        Location location = resolve(stored.get());
         if (location == null) {
             player.sendMessage(ChatColor.RED + "The infected spawn world is not loaded.");
             openMain(player);
@@ -798,7 +835,7 @@ public final class AdminGuiManager implements AdminGuiNavigator, AdminGuiClickHa
             SpawnRole role,
             int returnPage
     ) {
-        Location location = resolve(point.location(), true);
+        Location location = resolve(point.location());
         if (location == null) {
             player.sendMessage(ChatColor.RED + "World '" + point.location().world() + "' is not loaded.");
             openTeleportPoints(player, role, returnPage);
@@ -812,20 +849,12 @@ public final class AdminGuiManager implements AdminGuiNavigator, AdminGuiClickHa
         }
     }
 
-    private static Location resolve(AdminSetupService.StoredLocation stored, boolean safePointOffset) {
+    private static Location resolve(AdminSetupService.StoredLocation stored) {
         World world = Bukkit.getWorld(stored.world());
         if (world == null) {
             return null;
         }
-        double x = stored.x();
-        double y = stored.y();
-        double z = stored.z();
-        if (safePointOffset) {
-            x = Math.floor(x) + 0.5;
-            y = Math.floor(y) + 1.0;
-            z = Math.floor(z) + 0.5;
-        }
-        return new Location(world, x, y, z, stored.yaw(), stored.pitch());
+        return new Location(world, stored.x(), stored.y(), stored.z(), stored.yaw(), stored.pitch());
     }
 
     private Inventory create(AdminMenuHolder holder, int size, String title) {

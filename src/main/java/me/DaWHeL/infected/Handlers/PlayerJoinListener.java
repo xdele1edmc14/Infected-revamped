@@ -22,15 +22,19 @@ public final class PlayerJoinListener implements Listener {
         Player player = event.getPlayer();
         RoundPhase phase = gameManager.getPhase();
         if (phase == RoundPhase.LOBBY) {
-            gameManager.resetPlayerState(player);
             gameManager.registerLobbySurvivor(player);
             player.sendMessage(ChatColor.GREEN + "You joined as a survivor!");
             return;
         }
-        if (phase == RoundPhase.ENDING) {
-            player.sendMessage(ChatColor.YELLOW + "The Infected round is resetting. You will join the lobby shortly.");
+        if (phase.queuesLateJoins()) {
+            if (!gameManager.queueLateJoin(player)) {
+                player.sendMessage(ChatColor.RED
+                        + "You could not be safely queued for the current Infected round. "
+                        + "Please contact an administrator.");
+            }
             return;
         }
-        gameManager.queueLateJoin(player);
+        player.sendMessage(ChatColor.YELLOW
+                + "The Infected round is resetting. You will join the lobby shortly.");
     }
 }

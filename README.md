@@ -5,7 +5,7 @@
 This fork exists to turn that prototype into a safer, clearer, and more reliable minigame for real servers. It is being rebuilt with improved round flow, better setup and administrator controls, safer player handling, and fewer global side effects.
 
 > [!WARNING]
-> This project is actively being rebuilt and is **not production-ready**. Do not use it for live events or on a server with valuable player inventories until its gameplay, restoration, and reset systems have been completed and tested.
+> This project is actively being rebuilt and is **not production-ready**. Round-owned player state is now restored and lifecycle-tested, but validate the complete plugin on a staging server and keep inventory backups before hosting live events.
 
 ## Original Plugin Credit
 

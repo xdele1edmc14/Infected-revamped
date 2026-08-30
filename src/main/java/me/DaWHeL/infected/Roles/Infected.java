@@ -2,18 +2,18 @@ package me.DaWHeL.infected.Roles;
 
 import org.bukkit.*;
 import org.bukkit.entity.Player;
-import org.bukkit.inventory.ItemStack;
+import me.DaWHeL.infected.InfectedRoleEquipment;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.potion.PotionEffect;
 import org.bukkit.potion.PotionEffectType;
 
 public class Infected {
     private final Player player;
-    private final JavaPlugin plugin;
+    private final InfectedRoleEquipment roleEquipment;
 
-    public Infected(JavaPlugin plugin, Player player, boolean announce) {
+    public Infected(JavaPlugin plugin, Player player, boolean announce, InfectedRoleEquipment roleEquipment) {
         this.player = player;
-        this.plugin = plugin;
+        this.roleEquipment = roleEquipment;
         setup(announce);
     }
 
@@ -28,7 +28,7 @@ public class Infected {
         player.setGlowing(true);
         player.getInventory().clear();
         player.getInventory().setArmorContents(null);
-        player.getInventory().setHelmet(new ItemStack(Material.ZOMBIE_HEAD));
+        player.getInventory().setHelmet(roleEquipment.createHead());
         player.setPlayerListName(ChatColor.RED + player.getName());
         player.sendMessage(ChatColor.RED + "You are now a zombie!");
         player.addPotionEffect(new PotionEffect(PotionEffectType.SPEED, Integer.MAX_VALUE, 0, false, false, true));

@@ -36,7 +36,8 @@ class CombatPolicyTest {
     @Test
     void blocksEveryInfectedAttackBeforeActivePlay() {
         for (RoundPhase phase : new RoundPhase[]{
-                RoundPhase.LOBBY, RoundPhase.COUNTDOWN, RoundPhase.HEADSTART, RoundPhase.ENDING}) {
+                RoundPhase.LOBBY, RoundPhase.COUNTDOWN, RoundPhase.DEPLOYING,
+                RoundPhase.HEADSTART, RoundPhase.ENDING}) {
             assertEquals(new Decision(true, false), policy.decide(
                     phase,
                     ParticipantRole.INFECTED,

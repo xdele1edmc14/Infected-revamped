@@ -117,9 +117,9 @@ class TeleportManagerTest {
         ArgumentCaptor<Location> firstDestination = ArgumentCaptor.forClass(Location.class);
         verify(first).teleport(firstDestination.capture());
         assertAll(
-                () -> assertEquals(18.5, firstDestination.getValue().getX()),
+                () -> assertEquals(20.0, firstDestination.getValue().getX()),
                 () -> assertEquals(70.0, firstDestination.getValue().getY()),
-                () -> assertEquals(28.5, firstDestination.getValue().getZ()),
+                () -> assertEquals(30.0, firstDestination.getValue().getZ()),
                 () -> assertEquals(2, completion.get().attempted()),
                 () -> assertEquals(1, completion.get().succeeded()),
                 () -> assertEquals(List.of(second.getUniqueId()), completion.get().failedPlayerIds()),
@@ -127,6 +127,35 @@ class TeleportManagerTest {
         );
         verify(spawnRepository, never()).loadedLocations(SpawnRole.SURVIVOR);
         verify(task).cancel();
+    }
+
+    @Test
+    void reusesConfiguredPointsRoundRobinWithoutInventingGridOffsets() {
+        Location north = location(20.25, 70.5, 30.75);
+        Location south = location(-10.5, 65.25, 8.125);
+        when(spawnRepository.loadedLocations(SpawnRole.SURVIVOR)).thenReturn(List.of(north, south));
+        Player first = player(true);
+        Player second = player(true);
+        Player third = player(true);
+
+        manager.teleportPlayersBatch(
+                SpawnRole.SURVIVOR, List.of(first, second, third), 3, 0, result -> {
+                });
+
+        ArgumentCaptor<Runnable> operation = ArgumentCaptor.forClass(Runnable.class);
+        verify(scheduler).runRepeating(operation.capture(),
+                org.mockito.ArgumentMatchers.eq(0L), org.mockito.ArgumentMatchers.eq(1L));
+        operation.getValue().run();
+
+        ArgumentCaptor<Location> destinations = ArgumentCaptor.forClass(Location.class);
+        verify(first).teleport(destinations.capture());
+        verify(second).teleport(destinations.capture());
+        verify(third).teleport(destinations.capture());
+        assertAll(
+                () -> assertEquals(north, destinations.getAllValues().get(0)),
+                () -> assertEquals(south, destinations.getAllValues().get(1)),
+                () -> assertEquals(north, destinations.getAllValues().get(2))
+        );
     }
 
     @Test

@@ -15,21 +15,11 @@ public class InfectedDeathListener implements Listener {
 
     @EventHandler
     public void onPlayerDeath(PlayerDeathEvent event) {
-        // Get the dead player
         var player = event.getEntity();
-
-        // Check if the player is infected
-        boolean isInfected = gameManager.getInfected().stream()
-                .anyMatch(i -> i.getPlayer().equals(player));
-
-        if (!isInfected) return;
-
-        // ✅ Clear all dropped items
+        if (!gameManager.handlePlayerDeath(player)) {
+            return;
+        }
         event.getDrops().clear();
-
-        // (Optional) remove XP drop too
         event.setDroppedExp(0);
-
-        gameManager.handleInfectedDeath(player);
     }
 }

@@ -1,17 +1,24 @@
 package me.DaWHeL.infected.commands;
 
-import org.bukkit.*;
+import me.DaWHeL.infected.InfectedPlugin;
+import me.DaWHeL.infected.SpawnRepository;
+import org.bukkit.ChatColor;
+import org.bukkit.Location;
 import org.bukkit.command.*;
-import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.entity.Player;
-import org.bukkit.plugin.java.JavaPlugin;
+
+import java.util.Optional;
 
 public class TpInfectedSpawn implements CommandExecutor {
 
-    private final JavaPlugin plugin;
+    private final SpawnRepository spawnRepository;
 
-    public TpInfectedSpawn(JavaPlugin plugin) {
-        this.plugin = plugin;
+    public TpInfectedSpawn(InfectedPlugin plugin) {
+        this(new SpawnRepository(plugin));
+    }
+
+    TpInfectedSpawn(SpawnRepository spawnRepository) {
+        this.spawnRepository = java.util.Objects.requireNonNull(spawnRepository, "spawnRepository");
     }
 
     @Override
@@ -21,31 +28,18 @@ public class TpInfectedSpawn implements CommandExecutor {
             return true;
         }
 
-        FileConfiguration config = plugin.getConfig();
-
-        // Check if spawn is set
-        if (!config.isConfigurationSection("infected-spawn")) {
+        Optional<Location> spawn = spawnRepository.loadedHoldingSpawn();
+        if (spawn.isEmpty()) {
             player.sendMessage(ChatColor.RED + "No infected spawn has been set! Use /createinfectedspawn first.");
             return true;
         }
 
-        String worldName = config.getString("infected-spawn.world");
-        double x = config.getDouble("infected-spawn.x");
-        double y = config.getDouble("infected-spawn.y");
-        double z = config.getDouble("infected-spawn.z");
-        float yaw = (float) config.getDouble("infected-spawn.yaw");
-        float pitch = (float) config.getDouble("infected-spawn.pitch");
-
-        World world = Bukkit.getWorld(worldName);
-        if (world == null) {
-            player.sendMessage(ChatColor.RED + "The world '" + worldName + "' does not exist!");
-            return true;
+        if (player.teleport(spawn.get())) {
+            player.sendMessage(ChatColor.GREEN + "Teleported to infected spawn!");
+        } else {
+            player.sendMessage(ChatColor.RED
+                    + "Teleport to the infected spawn was cancelled by another plugin.");
         }
-
-        Location spawnLoc = new Location(world, x, y, z, yaw, pitch);
-        player.teleport(spawnLoc);
-        player.sendMessage(ChatColor.GREEN + "Teleported to infected spawn!");
-
         return true;
     }
 }

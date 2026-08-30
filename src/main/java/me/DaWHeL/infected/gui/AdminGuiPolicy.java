@@ -13,9 +13,7 @@ public final class AdminGuiPolicy {
     }
 
     public static boolean canStop(RoundPhase phase) {
-        return phase == RoundPhase.COUNTDOWN
-                || phase == RoundPhase.HEADSTART
-                || phase == RoundPhase.ACTIVE;
+        return phase.allowsAdminStop();
     }
 
     public static int pageCount(int itemCount, int pageSize) {

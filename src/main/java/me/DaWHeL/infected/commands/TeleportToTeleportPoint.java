@@ -1,20 +1,25 @@
 package me.DaWHeL.infected.commands;
 
-import org.bukkit.Bukkit;
+import me.DaWHeL.infected.InfectedPlugin;
+import me.DaWHeL.infected.SpawnRepository;
+import me.DaWHeL.infected.SpawnRole;
 import org.bukkit.ChatColor;
 import org.bukkit.Location;
-import org.bukkit.World;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
-import org.bukkit.plugin.java.JavaPlugin;
+import java.util.Optional;
 
 public class TeleportToTeleportPoint implements CommandExecutor {
-    private final JavaPlugin plugin;
+    private final SpawnRepository spawnRepository;
 
-    public TeleportToTeleportPoint(JavaPlugin plugin) {
-        this.plugin = plugin;
+    public TeleportToTeleportPoint(InfectedPlugin plugin) {
+        this(new SpawnRepository(plugin));
+    }
+
+    TeleportToTeleportPoint(SpawnRepository spawnRepository) {
+        this.spawnRepository = java.util.Objects.requireNonNull(spawnRepository, "spawnRepository");
     }
 
     @Override
@@ -32,27 +37,19 @@ public class TeleportToTeleportPoint implements CommandExecutor {
         }
 
         String pointName = args[0];
-        String basePath = "teleports." + pointName;
-
-        if (!plugin.getConfig().contains(basePath)) {
-            player.sendMessage(ChatColor.RED + "Teleport point '" + pointName + "' does not exist!");
+        Optional<Location> destination = spawnRepository.loadedLocation(SpawnRole.SURVIVOR, pointName);
+        if (destination.isEmpty()) {
+            player.sendMessage(ChatColor.RED + "Teleport point '" + pointName
+                    + "' does not exist or its world is not loaded!");
             return true;
         }
 
-        String worldName = plugin.getConfig().getString(basePath + ".world");
-        double x = plugin.getConfig().getDouble(basePath + ".x");
-        double y = plugin.getConfig().getDouble(basePath + ".y");
-        double z = plugin.getConfig().getDouble(basePath + ".z");
-
-        World world = Bukkit.getWorld(worldName);
-        if (world == null) {
-            player.sendMessage(ChatColor.RED + "World '" + worldName + "' is not loaded!");
-            return true;
+        if (player.teleport(destination.get())) {
+            player.sendMessage(ChatColor.GREEN + "Teleported to " + pointName + "!");
+        } else {
+            player.sendMessage(ChatColor.RED + "Teleport to " + pointName
+                    + " was cancelled by another plugin.");
         }
-
-        Location loc = new Location(world, x + 0.5, y + 1, z + 0.5);
-        player.teleport(loc);
-        player.sendMessage(ChatColor.GREEN + "Teleported to " + pointName + "!");
         return true;
     }
 }

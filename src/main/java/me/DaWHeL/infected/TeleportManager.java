@@ -153,8 +153,7 @@ public class TeleportManager {
                 }
 
                 attempted[0]++;
-                Location platform = platforms.get(distributionIndex % platforms.size());
-                Location destination = getNextSlot(platform, distributionIndex / platforms.size());
+                Location destination = platforms.get(distributionIndex % platforms.size()).clone();
                 beforeTeleport.accept(player);
                 boolean teleported = false;
                 try {
@@ -183,19 +182,4 @@ public class TeleportManager {
         return task;
     }
 
-    private Location getNextSlot(Location center, int slotIndex) {
-        int half = 2;
-        int row = slotIndex / 5;
-        int column = slotIndex % 5;
-        double x = center.getX() - half + column;
-        double z = center.getZ() - half + row;
-        return new Location(
-                center.getWorld(),
-                x + 0.5,
-                center.getY(),
-                z + 0.5,
-                center.getYaw(),
-                center.getPitch()
-        );
-    }
 }

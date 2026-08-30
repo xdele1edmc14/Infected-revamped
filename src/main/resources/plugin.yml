@@ -1,5 +1,5 @@
 name: Infected
-version: '1.0.3'
+version: '2.0.0'
 main: me.DaWHeL.infected.InfectedPlugin
 api-version: '1.21'
 load: STARTUP
@@ -7,8 +7,8 @@ authors: [ DaWHeL ]
 description: An infected minigame created for Outcraft
 commands:
   infected:
-    description: Opens the Infected event administration control desk
-    usage: "/infected [gui addteleport [survivor|release|respawn] <name>]"
+    description: Opens the admin GUI or runs Infected lifecycle controls
+    usage: "/infected [start|stop|reload|status|help|gui addteleport [survivor|release|respawn] <name>]"
     permission: infected.admin
   startinfected:
     description: Start the infected game
@@ -57,11 +57,6 @@ commands:
   tpinfectedspawn:
     description: Teleports you to the infected spawn location
     permission: infected.admin
-  givefeather:
-    description: Gives you a test Jump Feather.
-    permission: infected.admin
-
-
 permissions:
   infected.admin:
     description: Allows using all infected plugin admin commands

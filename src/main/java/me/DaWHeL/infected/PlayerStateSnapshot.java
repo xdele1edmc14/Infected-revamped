@@ -102,26 +102,47 @@ public final class PlayerStateSnapshot {
         );
     }
 
-    public void restore(Player player) {
+    public boolean restore(Player player) {
         Objects.requireNonNull(player, "player");
-        PlayerInventory inventory = player.getInventory();
+        boolean stateRestored = restoreState(player);
+        boolean locationRestored = attemptResult(
+                player, "location", () -> player.teleport(restorationLocation(player)));
+        return stateRestored && locationRestored;
+    }
 
-        attempt(player, "inventory storage", () -> inventory.setStorageContents(copy(storageContents)));
-        attempt(player, "armor", () -> inventory.setArmorContents(copy(armorContents)));
-        attempt(player, "off-hand item", () -> inventory.setItemInOffHand(copy(offHand)));
-        attempt(player, "held slot", () -> inventory.setHeldItemSlot(heldItemSlot));
-        attempt(player, "potion effects", () -> restoreEffects(player));
-        attempt(player, "game mode", () -> player.setGameMode(gameMode));
-        attempt(player, "glowing state", () -> player.setGlowing(glowing));
-        attempt(player, "tab-list name", () -> player.playerListName(playerListName));
-        attempt(player, "tab-list header and footer",
+    RespawnRestoration restoreForRespawn(Player player) {
+        Objects.requireNonNull(player, "player");
+        boolean stateRestored = restoreState(player);
+        try {
+            Location destination = restorationLocation(player);
+            return new RespawnRestoration(destination, stateRestored && destination != null);
+        } catch (RuntimeException exception) {
+            logFailure(player, "location", exception);
+            return new RespawnRestoration(null, false);
+        }
+    }
+
+    private boolean restoreState(Player player) {
+        PlayerInventory inventory = player.getInventory();
+        boolean restored = true;
+
+        restored &= attempt(player, "inventory storage",
+                () -> inventory.setStorageContents(copy(storageContents)));
+        restored &= attempt(player, "armor", () -> inventory.setArmorContents(copy(armorContents)));
+        restored &= attempt(player, "off-hand item", () -> inventory.setItemInOffHand(copy(offHand)));
+        restored &= attempt(player, "held slot", () -> inventory.setHeldItemSlot(heldItemSlot));
+        restored &= attempt(player, "potion effects", () -> restoreEffects(player));
+        restored &= attempt(player, "game mode", () -> player.setGameMode(gameMode));
+        restored &= attempt(player, "glowing state", () -> player.setGlowing(glowing));
+        restored &= attempt(player, "tab-list name", () -> player.playerListName(playerListName));
+        restored &= attempt(player, "tab-list header and footer",
                 () -> player.sendPlayerListHeaderAndFooter(playerListHeader, playerListFooter));
-        attempt(player, "scoreboard", () -> player.setScoreboard(scoreboard));
-        attempt(player, "compass target", () -> player.setCompassTarget(copy(compassTarget)));
-        attempt(player, "food level", () -> player.setFoodLevel(foodLevel));
-        attempt(player, "saturation", () -> player.setSaturation(saturation));
-        attempt(player, "exhaustion", () -> player.setExhaustion(exhaustion));
-        attempt(player, "location", () -> player.teleport(restorationLocation(player)));
+        restored &= attempt(player, "scoreboard", () -> player.setScoreboard(scoreboard));
+        restored &= attempt(player, "compass target", () -> player.setCompassTarget(copy(compassTarget)));
+        restored &= attempt(player, "food level", () -> player.setFoodLevel(foodLevel));
+        restored &= attempt(player, "saturation", () -> player.setSaturation(saturation));
+        restored &= attempt(player, "exhaustion", () -> player.setExhaustion(exhaustion));
+        return restored;
     }
 
     private void restoreEffects(Player player) {
@@ -134,14 +155,38 @@ public final class PlayerStateSnapshot {
         }
     }
 
-    private static void attempt(Player player, String property, Runnable restoration) {
+    private static boolean attempt(Player player, String property, Runnable restoration) {
         try {
             restoration.run();
+            return true;
         } catch (RuntimeException exception) {
-            LOGGER.log(Level.WARNING,
-                    "Could not restore " + property + " for player " + player.getUniqueId(),
-                    exception);
+            logFailure(player, property, exception);
+            return false;
         }
+    }
+
+    private static boolean attemptResult(
+            Player player,
+            String property,
+            java.util.function.BooleanSupplier restoration
+    ) {
+        try {
+            boolean restored = restoration.getAsBoolean();
+            if (!restored) {
+                LOGGER.warning("Could not restore " + property + " for player "
+                        + player.getUniqueId() + ": operation was cancelled.");
+            }
+            return restored;
+        } catch (RuntimeException exception) {
+            logFailure(player, property, exception);
+            return false;
+        }
+    }
+
+    private static void logFailure(Player player, String property, RuntimeException exception) {
+        LOGGER.log(Level.WARNING,
+                "Could not restore " + property + " for player " + player.getUniqueId(),
+                exception);
     }
 
     private Location restorationLocation(Player player) {
@@ -174,5 +219,8 @@ public final class PlayerStateSnapshot {
 
     private static Location copy(Location source) {
         return source == null ? null : source.clone();
+    }
+
+    record RespawnRestoration(Location location, boolean success) {
     }
 }

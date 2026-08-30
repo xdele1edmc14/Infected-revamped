@@ -1,7 +1,10 @@
 # Infected Plugin Configuration
 
 settings:
-  starting-zombies: 5            # Number of zombies to infect at the start of the game
+  minimum-players: 2             # Players required to start and continue the countdown
+  start-countdown-seconds: 10    # Seconds before the locked roster begins deployment
+  round-time-limit-seconds: 0    # Active-round limit; 0 disables expiry
+  starting-zombies: 1            # Number of zombies to infect at the start of the game
   infected-lives: 3              # Deaths an infected player can take before becoming a spectator
   infected-teleport-delay: 10    # Seconds after all the survivals finished teleporting, to start teleporting the infected players
 
@@ -17,8 +20,48 @@ scoreboard:
     - ""
     - "&7Have fun!"
 
+# Match titles and sounds. Set any sound to an empty string to disable it.
+presentation:
+  countdown:
+    title: "&e{time}"
+    subtitle: ""
+    sound: "BLOCK_NOTE_BLOCK_HAT"
+    volume: 1.0
+    pitch-base: 0.8
+    pitch-step: 0.2
+    fade-in-ticks: 0
+    stay-ticks: 20
+    fade-out-ticks: 0
+  deployment:
+    title: "&eGET READY"
+    subtitle: "&7Survivors are deploying"
+    sound: "BLOCK_BEACON_ACTIVATE"
+    volume: 1.0
+    pitch: 1.0
+    fade-in-ticks: 5
+    stay-ticks: 30
+    fade-out-ticks: 10
+  active:
+    survivor:
+      title: "&aSURVIVE!"
+      subtitle: "&7Stay alive and avoid infection"
+    infected:
+      title: "&cHUNT!"
+      subtitle: "&7Infect every survivor"
+    spectator:
+      title: "&eROUND STARTED"
+      subtitle: "&7You are queued for the next round"
+    sound: "ENTITY_ENDER_DRAGON_GROWL"
+    volume: 1.0
+    pitch: 1.0
+    fade-in-ticks: 5
+    stay-ticks: 40
+    fade-out-ticks: 10
+
 # Messages
 messages:
+  countdown: "&eThe Infected round starts in &c{time} &eseconds."
+  countdown-cancelled: "&cThe Infected countdown was cancelled because the round is no longer ready."
   game-start: "&eThe Infected game has started with &c{zombies} &ezombies!"
   game-stop: "The Infected game has been stopped!"
   survivors-teleporting: "&bSurvivors are being teleported..."
@@ -36,6 +79,8 @@ messages:
   already-running: "&cThe game is already running!"
   config-reloaded: "&aInfected plugin configuration reloaded!"
   round-abandoned: "&eThe Infected round was abandoned because a team left the event."
+  round-cancelled: "&cThe Infected round was cancelled."
+  round-expired: "&eTime expired. The remaining survivors win!"
   unsafe-infected-respawn: "&cNo safe dedicated infected respawn is available. The round has been cancelled."
   infected-admission-teleport-failed: "&cThe infected player could not be teleported safely. The round has been cancelled."
 

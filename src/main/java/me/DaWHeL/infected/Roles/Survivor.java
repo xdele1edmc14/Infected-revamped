@@ -8,10 +8,9 @@ public class Survivor {
 
     public Survivor(Player player) {
         this.player = player;
-        setup();
     }
 
-    private void setup() {
+    public void prepareForMatch() {
         player.setGlowing(false);
         player.getInventory().setHelmet(null);
         player.setPlayerListName(ChatColor.GREEN + player.getName());

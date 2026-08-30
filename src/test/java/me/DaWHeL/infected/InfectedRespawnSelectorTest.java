@@ -131,6 +131,25 @@ class InfectedRespawnSelectorTest {
         assertEquals(Material.STONE, selected.get().getWorld().getBlockAt(10, 63, 10).getType());
     }
 
+    @Test
+    void centersAConfiguredPointNearABlockEdgeBeforeSafetyValidation() {
+        Location configured = location(Material.STONE, Material.AIR, true, Material.AIR, true, true);
+        configured.setX(10.91);
+        configured.setZ(10.98);
+        configured.setYaw(73.5f);
+        configured.setPitch(12.25f);
+
+        Optional<Location> selected = InfectedRespawnSelector.select(
+                List.of(configured), new Random(2));
+
+        assertTrue(selected.isPresent());
+        assertEquals(10.5, selected.get().getX());
+        assertEquals(64.0, selected.get().getY());
+        assertEquals(10.5, selected.get().getZ());
+        assertEquals(73.5f, selected.get().getYaw());
+        assertEquals(12.25f, selected.get().getPitch());
+    }
+
     private static Location location(
             Material groundType,
             Material feetType,

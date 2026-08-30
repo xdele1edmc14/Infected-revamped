@@ -64,6 +64,19 @@ public final class SpawnRepository {
         return Optional.of(locations.get(random.nextInt(locations.size())).clone());
     }
 
+    public Optional<Location> loadedLocation(SpawnRole role, String name) {
+        Objects.requireNonNull(role, "role");
+        if (name == null || name.isBlank()) {
+            return Optional.empty();
+        }
+        return points(role).stream()
+                .filter(point -> point.name().equalsIgnoreCase(name))
+                .findFirst()
+                .map(NamedSpawn::location)
+                .flatMap(this::resolve)
+                .map(Location::clone);
+    }
+
     public void savePoint(SpawnRole role, String name, Location location) {
         validateName(name);
         writeLocation(rolePath(Objects.requireNonNull(role, "role")) + "." + name,
@@ -123,14 +136,29 @@ public final class SpawnRepository {
         if (world == null || world.isBlank()) {
             return Optional.empty();
         }
+        Optional<Double> x = finiteCoordinate(section, "x");
+        Optional<Double> y = finiteCoordinate(section, "y");
+        Optional<Double> z = finiteCoordinate(section, "z");
+        if (x.isEmpty() || y.isEmpty() || z.isEmpty()) {
+            return Optional.empty();
+        }
         return Optional.of(new StoredSpawn(
                 world,
-                section.getDouble("x"),
-                section.getDouble("y"),
-                section.getDouble("z"),
+                x.get(),
+                y.get(),
+                z.get(),
                 (float) section.getDouble("yaw"),
                 (float) section.getDouble("pitch")
         ));
+    }
+
+    private static Optional<Double> finiteCoordinate(ConfigurationSection section, String key) {
+        Object value = section.get(key);
+        if (!(value instanceof Number number)) {
+            return Optional.empty();
+        }
+        double coordinate = number.doubleValue();
+        return Double.isFinite(coordinate) ? Optional.of(coordinate) : Optional.empty();
     }
 
     private Optional<Location> resolve(StoredSpawn stored) {

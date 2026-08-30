@@ -1,8 +1,6 @@
 package me.DaWHeL.infected.commands;
 
-import me.DaWHeL.infected.GameManager;
-import me.DaWHeL.infected.StartResult;
-import org.bukkit.ChatColor;
+import me.DaWHeL.infected.admin.AdminActionService;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
@@ -10,20 +8,15 @@ import org.bukkit.command.CommandSender;
 import java.util.Objects;
 
 public final class StartGame implements CommandExecutor {
-    private final GameManager gameManager;
+    private final AdminActionService actions;
 
-    public StartGame(GameManager gameManager) {
-        this.gameManager = Objects.requireNonNull(gameManager, "gameManager");
+    public StartGame(AdminActionService actions) {
+        this.actions = Objects.requireNonNull(actions, "actions");
     }
 
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
-        StartResult result = gameManager.startGame();
-        if (!result.success()) {
-            for (String error : result.errors()) {
-                sender.sendMessage(ChatColor.RED + error);
-            }
-        }
+        actions.start(sender);
         return true;
     }
 }

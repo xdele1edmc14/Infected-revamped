@@ -5,6 +5,7 @@ import me.DaWHeL.infected.InfectedPlugin;
 import me.DaWHeL.infected.RoundActionResult;
 import me.DaWHeL.infected.RoundPhase;
 import me.DaWHeL.infected.SpawnRole;
+import me.DaWHeL.infected.StartResult;
 import me.DaWHeL.infected.Roles.Survivor;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
@@ -28,6 +29,7 @@ class AdminGuiManagerTest {
     private GameManager gameManager;
     private InfectedPlugin plugin;
     private AdminSetupService setupService;
+    private SpawnCreationSessionManager spawnSessions;
     private AdminGuiManager manager;
     private Player administrator;
 
@@ -36,9 +38,11 @@ class AdminGuiManagerTest {
         plugin = mock(InfectedPlugin.class);
         gameManager = mock(GameManager.class);
         setupService = mock(AdminSetupService.class);
+        spawnSessions = mock(SpawnCreationSessionManager.class);
         when(gameManager.getSurvivors()).thenReturn(List.of());
         when(gameManager.getInfected()).thenReturn(List.of());
-        manager = spy(new AdminGuiManager(plugin, gameManager, setupService));
+        when(gameManager.getPhase()).thenReturn(RoundPhase.LOBBY);
+        manager = spy(new AdminGuiManager(plugin, gameManager, setupService, spawnSessions));
         administrator = mock(Player.class);
         doNothing().when(manager).openMain(any(Player.class));
         doNothing().when(manager).openTeleportRoles(any(Player.class));
@@ -46,6 +50,44 @@ class AdminGuiManagerTest {
         doNothing().when(manager).openTeleportPoints(any(Player.class), any(SpawnRole.class), anyInt());
         doNothing().when(manager).openPlayers(any(Player.class), anyInt());
         doNothing().when(manager).openPlayerActions(any(Player.class), any(UUID.class), anyInt());
+    }
+
+    @Test
+    void addLocationStartsChatNamingForTheExactRoleAndPage() {
+        when(gameManager.getPhase()).thenReturn(RoundPhase.LOBBY);
+        AdminMenuHolder holder = AdminMenuHolder.page(
+                AdminMenuHolder.MenuType.TELEPORT_POINTS,
+                3,
+                Map.of(),
+                SpawnRole.INFECTED_RELEASE);
+
+        manager.handleClick(administrator, holder, AdminGuiLayout.CLOSE, ClickType.LEFT);
+
+        verify(spawnSessions).begin(administrator, SpawnRole.INFECTED_RELEASE, 3);
+        verify(administrator, never()).sendMessage(contains("/infected gui addteleport"));
+    }
+
+    @Test
+    void successfulGuiStartCancelsEveryPendingSpawnPrompt() {
+        when(gameManager.startGame()).thenReturn(StartResult.started());
+        AdminMenuHolder confirmation = AdminMenuHolder.confirmation(
+                AdminMenuHolder.ConfirmationAction.START, null, null, 0);
+
+        manager.handleClick(administrator, confirmation, AdminGuiLayout.CONFIRM, ClickType.LEFT);
+
+        verify(spawnSessions).cancelAll();
+    }
+
+    @Test
+    void acceptedGuiReloadCancelsEveryPendingSpawnPrompt() {
+        when(gameManager.getPhase()).thenReturn(RoundPhase.LOBBY);
+        when(plugin.getConfig()).thenReturn(new org.bukkit.configuration.file.YamlConfiguration());
+
+        manager.handleClick(administrator, AdminMenuHolder.root(AdminMenuHolder.MenuType.MAIN),
+                AdminGuiLayout.RELOAD_CONFIG, ClickType.LEFT);
+
+        verify(spawnSessions).cancelAll();
+        verify(plugin).reloadConfig();
     }
 
     @Test
@@ -130,9 +172,9 @@ class AdminGuiManagerTest {
 
         ArgumentCaptor<Location> destination = ArgumentCaptor.forClass(Location.class);
         verify(administrator).teleport(destination.capture());
-        org.junit.jupiter.api.Assertions.assertEquals(20.5, destination.getValue().getX());
-        org.junit.jupiter.api.Assertions.assertEquals(71.0, destination.getValue().getY());
-        org.junit.jupiter.api.Assertions.assertEquals(20.5, destination.getValue().getZ());
+        org.junit.jupiter.api.Assertions.assertEquals(20.0, destination.getValue().getX());
+        org.junit.jupiter.api.Assertions.assertEquals(70.0, destination.getValue().getY());
+        org.junit.jupiter.api.Assertions.assertEquals(20.0, destination.getValue().getZ());
     }
 
     @Test
@@ -232,6 +274,50 @@ class AdminGuiManagerTest {
 
         verify(plugin, never()).reloadConfig();
         verify(administrator).sendMessage(contains("only be reloaded in the lobby"));
+    }
+
+    @Test
+    void activeRoundCannotOverwriteHoldingSpawnThroughGui() {
+        when(gameManager.getPhase()).thenReturn(RoundPhase.ACTIVE);
+
+        manager.handleClick(administrator, AdminMenuHolder.root(AdminMenuHolder.MenuType.MAIN),
+                AdminGuiLayout.INFECTED_SPAWN, ClickType.LEFT);
+
+        verify(setupService, never()).setInfectedSpawn(any(Location.class));
+        verify(administrator).sendMessage(contains("only be changed"));
+    }
+
+    @Test
+    void staleClearConfirmationCannotMutateSetupAfterRoundStarts() {
+        when(gameManager.getPhase()).thenReturn(RoundPhase.ACTIVE);
+        AdminSetupService.StoredLocation stored =
+                new AdminSetupService.StoredLocation("arena", 2, 64, 3, 0, 0);
+        when(setupService.infectedSpawn()).thenReturn(Optional.of(stored));
+        AdminMenuHolder holder = AdminMenuHolder.confirmation(
+                AdminMenuHolder.ConfirmationAction.CLEAR_INFECTED_SPAWN,
+                null, expectedState(stored), 0);
+
+        manager.handleClick(administrator, holder, AdminGuiLayout.CONFIRM, ClickType.LEFT);
+
+        verify(setupService, never()).clearInfectedSpawn();
+        verify(administrator).sendMessage(contains("only be changed"));
+    }
+
+    @Test
+    void staleDeleteConfirmationCannotMutateSetupAfterRoundStarts() {
+        when(gameManager.getPhase()).thenReturn(RoundPhase.ACTIVE);
+        AdminSetupService.StoredLocation stored =
+                new AdminSetupService.StoredLocation("arena", 2, 64, 3, 0, 0);
+        when(setupService.teleportPoints(SpawnRole.SURVIVOR))
+                .thenReturn(List.of(point("north", stored)));
+        AdminMenuHolder holder = AdminMenuHolder.confirmation(
+                AdminMenuHolder.ConfirmationAction.DELETE_TELEPORT_POINT,
+                "north", expectedState(stored), 0, SpawnRole.SURVIVOR);
+
+        manager.handleClick(administrator, holder, AdminGuiLayout.CONFIRM, ClickType.LEFT);
+
+        verify(setupService, never()).deleteTeleportPoint(any(SpawnRole.class), anyString());
+        verify(administrator).sendMessage(contains("only be changed"));
     }
 
     @Test

@@ -1,6 +1,9 @@
 package me.DaWHeL.infected.commands;
 
 import me.DaWHeL.infected.InfectedPlugin;
+import me.DaWHeL.infected.GameManager;
+import me.DaWHeL.infected.RoundPhase;
+import me.DaWHeL.infected.gui.AdminSetupService;
 import org.bukkit.ChatColor;
 import org.bukkit.Location;
 import org.bukkit.command.Command;
@@ -10,10 +13,16 @@ import org.bukkit.entity.Player;
 
 public class CreateInfectedSpawn implements CommandExecutor {
 
-    private final InfectedPlugin plugin;
+    private final GameManager gameManager;
+    private final AdminSetupService setupService;
 
     public CreateInfectedSpawn(InfectedPlugin plugin) {
-        this.plugin = plugin;
+        this(plugin.getGameManager(), new AdminSetupService(plugin));
+    }
+
+    CreateInfectedSpawn(GameManager gameManager, AdminSetupService setupService) {
+        this.gameManager = java.util.Objects.requireNonNull(gameManager, "gameManager");
+        this.setupService = java.util.Objects.requireNonNull(setupService, "setupService");
     }
 
     @Override
@@ -22,15 +31,19 @@ public class CreateInfectedSpawn implements CommandExecutor {
             sender.sendMessage("Only players can use this command!");
             return true;
         }
+        if (gameManager.getPhase() != RoundPhase.LOBBY) {
+            player.sendMessage(ChatColor.RED
+                    + "Spawn setup can only be changed while the event is in the lobby.");
+            return true;
+        }
 
         Location loc = player.getLocation();
-        plugin.getConfig().set("infected-spawn.world", loc.getWorld().getName());
-        plugin.getConfig().set("infected-spawn.x", loc.getX());
-        plugin.getConfig().set("infected-spawn.y", loc.getY());
-        plugin.getConfig().set("infected-spawn.z", loc.getZ());
-        plugin.getConfig().set("infected-spawn.yaw", loc.getYaw());
-        plugin.getConfig().set("infected-spawn.pitch", loc.getPitch());
-        plugin.saveConfig();
+        try {
+            setupService.setInfectedSpawn(loc);
+        } catch (IllegalArgumentException exception) {
+            player.sendMessage(ChatColor.RED + exception.getMessage());
+            return true;
+        }
 
         player.sendMessage(ChatColor.GREEN + "Infected spawn set at your current location!");
         return true;

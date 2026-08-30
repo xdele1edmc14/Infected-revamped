@@ -1,6 +1,7 @@
 package me.DaWHeL.infected.gui;
 
 import me.DaWHeL.infected.InfectedPlugin;
+import me.DaWHeL.infected.InfectedRespawnSelector;
 import me.DaWHeL.infected.RoundStartValidator;
 import me.DaWHeL.infected.SpawnRepository;
 import me.DaWHeL.infected.SpawnRole;
@@ -12,9 +13,11 @@ import java.util.List;
 import java.util.EnumSet;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.regex.Pattern;
 
 public final class AdminSetupService {
     private static final String INFECTED_SPAWN = "infected-spawn";
+    private static final Pattern POINT_NAME = Pattern.compile("[A-Za-z0-9_-]{1,32}");
     private final InfectedPlugin plugin;
     private final SpawnRepository spawnRepository;
 
@@ -42,17 +45,25 @@ public final class AdminSetupService {
     }
 
     public SetupSnapshot snapshot(int survivors, int infected) {
+        int survivorSpawns = spawnRepository.loadedLocations(SpawnRole.SURVIVOR).size();
+        int releaseSpawns = spawnRepository.loadedLocations(SpawnRole.INFECTED_RELEASE).size();
+        int respawnSpawns = (int) spawnRepository.loadedLocations(SpawnRole.INFECTED_RESPAWN).stream()
+                .filter(InfectedRespawnSelector::isSafe)
+                .count();
         return new SetupSnapshot(
-                infectedSpawn().isPresent(),
-                teleportPoints(SpawnRole.SURVIVOR).size(),
-                teleportPoints(SpawnRole.INFECTED_RELEASE).size(),
-                teleportPoints(SpawnRole.INFECTED_RESPAWN).size(),
+                spawnRepository.loadedHoldingSpawn().isPresent(),
+                survivorSpawns,
+                releaseSpawns,
+                respawnSpawns,
                 survivors,
                 infected,
                 config().getInt("settings.starting-zombies", 5),
                 config().getInt("settings.infected-teleport-delay", 10),
                 config().getInt("settings.teleport-batch-size", 5),
-                config().getInt("settings.teleport-delay", 20)
+                config().getInt("settings.teleport-delay", 20),
+                config().getInt("settings.minimum-players", 2),
+                config().getInt("settings.start-countdown-seconds", 10),
+                config().getInt("settings.round-time-limit-seconds", 0)
         );
     }
 
@@ -76,6 +87,11 @@ public final class AdminSetupService {
 
     public void saveTeleportPoint(SpawnRole role, String name, Location location) {
         validatePointName(name);
+        if (spawnRepository.points(role).stream()
+                .anyMatch(point -> point.name().equalsIgnoreCase(name))) {
+            throw new IllegalArgumentException("A spawn named '" + name
+                    + "' already exists in this spawn group.");
+        }
         spawnRepository.savePoint(role, name, location);
     }
 
@@ -89,8 +105,12 @@ public final class AdminSetupService {
     }
 
     public static void validatePointName(String name) {
-        if (name == null || name.isBlank() || name.contains(".")) {
-            throw new IllegalArgumentException("Teleport point names cannot be blank or contain periods.");
+        if (name == null || !POINT_NAME.matcher(name).matches()) {
+            throw new IllegalArgumentException(
+                    "Spawn names must be 1-32 characters using only letters, numbers, _ or -.");
+        }
+        if (name.equalsIgnoreCase("close")) {
+            throw new IllegalArgumentException("The name 'close' is reserved for cancelling spawn creation.");
         }
     }
 
@@ -103,14 +123,29 @@ public final class AdminSetupService {
         if (world == null || world.isBlank()) {
             return Optional.empty();
         }
+        Optional<Double> x = finiteCoordinate(section, "x");
+        Optional<Double> y = finiteCoordinate(section, "y");
+        Optional<Double> z = finiteCoordinate(section, "z");
+        if (x.isEmpty() || y.isEmpty() || z.isEmpty()) {
+            return Optional.empty();
+        }
         return Optional.of(new StoredLocation(
                 world,
-                section.getDouble("x"),
-                section.getDouble("y"),
-                section.getDouble("z"),
+                x.get(),
+                y.get(),
+                z.get(),
                 (float) section.getDouble("yaw"),
                 (float) section.getDouble("pitch")
         ));
+    }
+
+    private static Optional<Double> finiteCoordinate(ConfigurationSection section, String key) {
+        Object value = section.get(key);
+        if (!(value instanceof Number number)) {
+            return Optional.empty();
+        }
+        double coordinate = number.doubleValue();
+        return Double.isFinite(coordinate) ? Optional.of(coordinate) : Optional.empty();
     }
 
     private void writeLocation(String path, Location location) {
@@ -158,8 +193,29 @@ public final class AdminSetupService {
             int startingInfected,
             int infectedTeleportDelay,
             int teleportBatchSize,
-            int teleportDelayTicks
+            int teleportDelayTicks,
+            int minimumPlayers,
+            int startCountdownSeconds,
+            int roundTimeLimitSeconds
     ) {
+        public SetupSnapshot(
+                boolean infectedSpawnConfigured,
+                int survivorSpawnCount,
+                int infectedReleaseSpawnCount,
+                int infectedRespawnSpawnCount,
+                int survivors,
+                int infected,
+                int startingInfected,
+                int infectedTeleportDelay,
+                int teleportBatchSize,
+                int teleportDelayTicks
+        ) {
+            this(infectedSpawnConfigured, survivorSpawnCount, infectedReleaseSpawnCount,
+                    infectedRespawnSpawnCount, survivors, infected, startingInfected,
+                    infectedTeleportDelay, teleportBatchSize, teleportDelayTicks,
+                    Math.max(2, startingInfected + 1), 10, 0);
+        }
+
         public SetupSnapshot(
                 boolean infectedSpawnConfigured,
                 int teleportPointCount,
@@ -179,6 +235,9 @@ public final class AdminSetupService {
                     startingInfected,
                     infectedTeleportDelay,
                     teleportBatchSize,
+                    0,
+                    Math.max(2, startingInfected + 1),
+                    10,
                     0
             );
         }
@@ -209,7 +268,10 @@ public final class AdminSetupService {
                     startingInfected,
                     teleportBatchSize,
                     teleportDelayTicks,
-                    infectedTeleportDelay
+                    infectedTeleportDelay,
+                    minimumPlayers,
+                    startCountdownSeconds,
+                    roundTimeLimitSeconds
             )).errors();
         }
     }

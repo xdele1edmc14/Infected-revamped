@@ -3,6 +3,7 @@ package me.DaWHeL.infected.gui;
 import me.DaWHeL.infected.GameManager;
 import me.DaWHeL.infected.RoundPhase;
 import me.DaWHeL.infected.SpawnRole;
+import me.DaWHeL.infected.admin.AdminActionService;
 import org.bukkit.ChatColor;
 import org.bukkit.Location;
 import org.bukkit.command.Command;
@@ -18,7 +19,7 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 class InfectedAdminCommandTest {
-    private GameManager gameManager;
+    private AdminActionService actions;
     private AdminSetupService setupService;
     private AdminGuiNavigator navigator;
     private InfectedAdminCommand command;
@@ -26,10 +27,11 @@ class InfectedAdminCommandTest {
 
     @BeforeEach
     void setUp() {
-        gameManager = mock(GameManager.class);
+        actions = mock(AdminActionService.class);
         setupService = mock(AdminSetupService.class);
         navigator = mock(AdminGuiNavigator.class);
-        command = new InfectedAdminCommand(gameManager, setupService, navigator);
+        when(actions.setupChangesAllowed()).thenReturn(true);
+        command = new InfectedAdminCommand(actions, setupService, navigator);
         bukkitCommand = mock(Command.class);
     }
 
@@ -56,24 +58,29 @@ class InfectedAdminCommandTest {
     @Test
     void consoleReceivesCompactStatusAndHelp() {
         CommandSender console = mock(CommandSender.class);
-        when(gameManager.getPhase()).thenReturn(RoundPhase.HEADSTART);
-        when(gameManager.getSurvivors()).thenReturn(List.of());
-        when(gameManager.getInfected()).thenReturn(List.of());
-        when(setupService.snapshot(0, 0)).thenReturn(
-                new AdminSetupService.SetupSnapshot(true, 2, 2, 2, 6, 0, 2, 10, 5, 20));
+        when(console.hasPermission("infected.admin")).thenReturn(true);
 
         assertTrue(command.onCommand(console, bukkitCommand, "infected", new String[0]));
 
-        ArgumentCaptor<String> messages = ArgumentCaptor.forClass(String.class);
-        verify(console, atLeast(3)).sendMessage(messages.capture());
-        String combined = ChatColor.stripColor(String.join("\n", messages.getAllValues()));
-        assertAll(
-                () -> assertTrue(combined.contains("State: HEADSTART")),
-                () -> assertTrue(combined.contains("Survivors: 0")),
-                () -> assertTrue(combined.contains("Infected: 0")),
-                () -> assertTrue(combined.contains("Setup: Ready")),
-                () -> assertTrue(combined.contains("/infected"))
-        );
+        verify(actions).status(console);
+        verify(actions).help(console);
+    }
+
+    @Test
+    void rootLifecycleSubcommandsDelegateToSharedActions() {
+        Player player = authorizedPlayer();
+
+        assertTrue(command.onCommand(player, bukkitCommand, "infected", new String[]{"start"}));
+        assertTrue(command.onCommand(player, bukkitCommand, "infected", new String[]{"stop"}));
+        assertTrue(command.onCommand(player, bukkitCommand, "infected", new String[]{"reload"}));
+        assertTrue(command.onCommand(player, bukkitCommand, "infected", new String[]{"status"}));
+        assertTrue(command.onCommand(player, bukkitCommand, "infected", new String[]{"help"}));
+
+        verify(actions).start(player);
+        verify(actions).stop(player);
+        verify(actions).reload(player);
+        verify(actions).status(player);
+        verify(actions).help(player);
     }
 
     @Test
@@ -103,6 +110,18 @@ class InfectedAdminCommandTest {
     }
 
     @Test
+    void addTeleportSubcommandRejectsLiveRoundMutation() {
+        Player player = authorizedPlayer();
+        when(actions.setupChangesAllowed()).thenReturn(false);
+
+        assertTrue(command.onCommand(player, bukkitCommand, "infected",
+                new String[]{"gui", "addteleport", "north"}));
+
+        verifyNoInteractions(setupService, navigator);
+        verify(player).sendMessage(contains("lobby"));
+    }
+
+    @Test
     void invalidSpawnRoleDoesNotWriteConfiguration() {
         Player player = authorizedPlayer();
 
@@ -120,7 +139,7 @@ class InfectedAdminCommandTest {
         assertTrue(command.onCommand(player, bukkitCommand, "infected",
                 new String[]{"gui", "addteleport", "north.spawn"}));
 
-        verify(player).sendMessage(contains("cannot be blank or contain periods"));
+        verify(player).sendMessage(contains("1-32 characters"));
         verifyNoInteractions(setupService, navigator);
     }
 
@@ -131,6 +150,8 @@ class InfectedAdminCommandTest {
         assertAll(
                 () -> assertEquals(List.of("gui"),
                         command.onTabComplete(player, bukkitCommand, "infected", new String[]{"g"})),
+                () -> assertEquals(List.of("start", "stop", "status"),
+                        command.onTabComplete(player, bukkitCommand, "infected", new String[]{"st"})),
                 () -> assertEquals(List.of("addteleport"),
                         command.onTabComplete(player, bukkitCommand, "infected", new String[]{"gui", "a"})),
                 () -> assertEquals(List.of("survivor", "release", "respawn"),
