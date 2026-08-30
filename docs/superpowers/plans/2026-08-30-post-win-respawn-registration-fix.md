@@ -86,11 +86,11 @@ Stage `GameManager.java`, `GameManagerLifecycleTest.java`, and this implementati
 - Consumes: the fixed and tested round lifecycle.
 - Produces: `target/Infected-2.0.1.jar` with packaged metadata version `2.0.1`.
 
-- [ ] **Step 1: Update active release metadata**
+- [x] **Step 1: Update active release metadata**
 
 Change the Maven project version, source `plugin.yml` version, and metadata test expectation from `2.0.0` to `2.0.1`. Preserve historical design/plan references to earlier artifacts.
 
-- [ ] **Step 2: Run the complete clean package build**
+- [x] **Step 2: Run the complete clean package build**
 
 Run:
 
@@ -100,10 +100,10 @@ mvn.cmd -o clean package
 
 Expected: 266 tests pass with zero failures/errors and `target/Infected-2.0.1.jar` is produced.
 
-- [ ] **Step 3: Verify release artifact and source hygiene**
+- [x] **Step 3: Verify release artifact and source hygiene**
 
 Inspect the packaged `plugin.yml`, calculate SHA-256, run `git diff --check -- . ':(exclude)target/**'`, and confirm only intended non-`target/` files changed.
 
-- [ ] **Step 4: Commit and push**
+- [x] **Step 4: Commit and push**
 
 Stage only source, test, metadata, spec, and plan files. Commit the patch release and push `codex/phase-1-lifecycle` to `origin`, then verify the remote head equals local `HEAD`.

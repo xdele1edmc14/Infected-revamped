@@ -1,5 +1,5 @@
 name: Infected
-version: '2.0.0'
+version: '2.0.1'
 main: me.DaWHeL.infected.InfectedPlugin
 api-version: '1.21'
 load: STARTUP
