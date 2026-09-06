@@ -35,6 +35,10 @@ public final class InfectedLifeTracker {
         return eliminatedPlayers.contains(playerId);
     }
 
+    public int remainingLives(UUID playerId) {
+        return remainingLives.getOrDefault(playerId, 0);
+    }
+
     public void remove(UUID playerId) {
         remainingLives.remove(playerId);
         eliminatedPlayers.remove(playerId);

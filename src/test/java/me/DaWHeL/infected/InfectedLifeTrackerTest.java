@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class InfectedLifeTrackerTest {
@@ -41,5 +42,16 @@ class InfectedLifeTrackerTest {
         tracker.clear();
 
         assertFalse(tracker.isEliminated(playerId));
+    }
+
+    @Test
+    void exposesTheCurrentRemainingLifeCount() {
+        UUID playerId = UUID.randomUUID();
+        InfectedLifeTracker tracker = new InfectedLifeTracker();
+        tracker.register(playerId, 3);
+
+        tracker.consumeLife(playerId);
+
+        assertEquals(2, tracker.remainingLives(playerId));
     }
 }

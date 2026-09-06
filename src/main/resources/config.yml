@@ -10,12 +10,58 @@ settings:
 
 # Scoreboard configuration
 scoreboard:
-  title: "&a&lInfected Game"
-  lines:
-    - "&cInfected: &f{infected}"
-    - "&bSurvivors: &f{survivors}"
-    - ""
-    - "&7Have fun!"
+  enabled: true
+  update-interval-ticks: 20
+  title: "<gradient:#55ffff:#ff5555><bold>INFECTED</bold></gradient>"
+
+  # Every visible line is configurable. MiniMessage and legacy & color codes
+  # are both supported, but should not be mixed in the same string.
+  layouts:
+    survivor:
+      - ""
+      - "<gray>Role: <aqua>{role}"
+      - "<gray>Kills: <white>{kills}"
+      - ""
+      - "<aqua>Survivors: <white>{survivors}"
+      - "<red>Infected: <white>{infected}"
+      - ""
+      - "<gray>Outbreak"
+      - "{outbreak_bar}"
+    infected:
+      - ""
+      - "<gray>Role: <red>{role}"
+      - "<gray>Infections: <white>{infections}"
+      - "<gray>Lives: {lives_hearts} <white>{lives}/{max_lives}"
+      - ""
+      - "<aqua>Survivors: <white>{survivors}"
+      - "<red>Infected: <white>{infected}"
+      - ""
+      - "<gray>Outbreak"
+      - "{outbreak_bar}"
+    spectator:
+      - ""
+      - "<gray>Role: <white>{role}"
+      - ""
+      - "<aqua>Survivors: <white>{survivors}"
+      - "<red>Infected: <white>{infected}"
+      - ""
+      - "<gray>Outbreak"
+      - "{outbreak_bar}"
+
+  role-names:
+    survivor: "Survivor"
+    infected: "Infected"
+    spectator: "Spectator"
+
+  lives:
+    full: "<red>♥"
+    empty: "<dark_gray>♡"
+
+  outbreak:
+    segments: 12
+    survivor-segment: "<aqua>■"
+    infected-segment: "<red>■"
+    empty-segment: "<dark_gray>■"
 
 # Messages
 messages:

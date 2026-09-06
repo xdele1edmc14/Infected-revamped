@@ -458,6 +458,36 @@ class GameManagerLifecycleTest {
         );
     }
 
+    @Test
+    void activeCombatRecordsRoleSpecificRoundStats() {
+        startActiveRound(3, 1);
+        Player attacker = gameManager.getInfected().getFirst().getPlayer();
+        Player converted = gameManager.getSurvivors().getFirst().getPlayer();
+        Player survivor = gameManager.getSurvivors().getLast().getPlayer();
+
+        gameManager.infectPlayer(converted, attacker, true);
+        gameManager.recordSurvivorKill(survivor);
+        gameManager.recordSurvivorKill(attacker);
+
+        assertAll(
+                () -> assertEquals(1, gameManager.infections(attacker)),
+                () -> assertEquals(1, gameManager.kills(survivor)),
+                () -> assertEquals(0, gameManager.kills(attacker))
+        );
+    }
+
+    @Test
+    void shutdownClearsPersonalRoundStats() {
+        startActiveRound(2, 1);
+        Player survivor = gameManager.getSurvivors().getFirst().getPlayer();
+        gameManager.recordSurvivorKill(survivor);
+        assertEquals(1, gameManager.kills(survivor));
+
+        gameManager.shutdown();
+
+        assertEquals(0, gameManager.kills(survivor));
+    }
+
     private void startActiveRound(int participants, int startingInfected) {
         configureValidSetup(participants, startingInfected);
         for (int index = 0; index < participants; index++) {

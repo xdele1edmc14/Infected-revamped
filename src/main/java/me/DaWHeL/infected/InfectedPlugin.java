@@ -111,9 +111,11 @@ public final class InfectedPlugin extends JavaPlugin {
         getServer().getPluginManager().registerEvents(weaponSelectionListener, this);
         getServer().getPluginManager().registerEvents(new WeaponLootGuiListener(this, weaponLootGuiManager), this);
 
+        long scoreboardUpdateInterval = Math.max(1L,
+                getConfig().getLong("scoreboard.update-interval-ticks", 20L));
         Bukkit.getScheduler().runTaskTimer(this, () -> {
             gameManager.getScoreboardManager().updateScoreboard();
-        }, 0L, 40L); // every 2 seconds
+        }, 0L, scoreboardUpdateInterval);
 
         getLogger().info("##################################");
         getLogger().info("#                                #");

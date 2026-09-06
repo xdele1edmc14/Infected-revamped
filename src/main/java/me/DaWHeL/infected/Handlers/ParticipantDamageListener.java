@@ -60,7 +60,7 @@ public final class ParticipantDamageListener implements Listener {
             return;
         }
         if (decision.infectVictim()) {
-            gameManager.infectPlayer(victim, true);
+            gameManager.infectPlayer(victim, attacker, true);
         }
     }
 

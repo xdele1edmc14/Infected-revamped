@@ -34,6 +34,7 @@ public class GameManager {
     private final List<Survivor> survivors = new ArrayList<>();
     private final List<Infected> infected = new ArrayList<>();
     private final InfectedLifeTracker infectedLives = new InfectedLifeTracker();
+    private final RoundStatsTracker roundStats = new RoundStatsTracker();
     private final ScoreboardManager scoreboardManager;
     private final Map<UUID, Player> roundParticipants = new LinkedHashMap<>();
     private final Set<UUID> containedInfected = new LinkedHashSet<>();
@@ -207,6 +208,7 @@ public class GameManager {
         cancelRoundTasks();
         infected.clear();
         infectedLives.clear();
+        roundStats.clear();
         queuedPlayers.clear();
         containedInfected.clear();
         roundTeleportBypass.clear();
@@ -393,6 +395,7 @@ public class GameManager {
         roundParticipants.clear();
         queuedPlayers.clear();
         infectedLives.clear();
+        roundStats.clear();
         for (Player player : plugin.getServer().getOnlinePlayers()) {
             if (processed.add(player.getUniqueId()) && player.isOnline()) {
                 resetPlayerState(player);
@@ -430,13 +433,20 @@ public class GameManager {
         if (phase == RoundPhase.ACTIVE
                 && roleOf(attacker) == ParticipantRole.INFECTED
                 && roleOf(victim) == ParticipantRole.SURVIVOR) {
-            infectPlayer(victim, true);
+            infectPlayer(victim, attacker, true);
         }
     }
 
     public void infectPlayer(Player victim, boolean announce) {
+        infectPlayer(victim, null, announce);
+    }
+
+    public void infectPlayer(Player victim, Player attacker, boolean announce) {
         if (phase != RoundPhase.ACTIVE || roleOf(victim) != ParticipantRole.SURVIVOR) {
             return;
+        }
+        if (roleOf(attacker) == ParticipantRole.INFECTED) {
+            roundStats.recordInfection(attacker.getUniqueId());
         }
         survivors.removeIf(survivor -> samePlayer(survivor.getPlayer(), victim));
         assignInfected(victim);
@@ -582,7 +592,30 @@ public class GameManager {
         roundParticipants.remove(player.getUniqueId());
         containedInfected.remove(player.getUniqueId());
         roundTeleportBypass.remove(player.getUniqueId());
+        roundStats.remove(player.getUniqueId());
         return departedRole;
+    }
+
+    public void recordSurvivorKill(Player player) {
+        if (phase == RoundPhase.ACTIVE && roleOf(player) == ParticipantRole.SURVIVOR) {
+            roundStats.recordKill(player.getUniqueId());
+        }
+    }
+
+    public int kills(Player player) {
+        return player == null ? 0 : roundStats.kills(player.getUniqueId());
+    }
+
+    public int infections(Player player) {
+        return player == null ? 0 : roundStats.infections(player.getUniqueId());
+    }
+
+    public int remainingInfectedLives(Player player) {
+        return player == null ? 0 : infectedLives.remainingLives(player.getUniqueId());
+    }
+
+    public int configuredInfectedLives() {
+        return getConfiguredInfectedLives();
     }
 
     public boolean handleInfectedDeath(Player player) {
@@ -654,6 +687,7 @@ public class GameManager {
         containedInfected.clear();
         roundTeleportBypass.clear();
         infectedLives.clear();
+        roundStats.clear();
         phase = RoundPhase.LOBBY;
     }
 

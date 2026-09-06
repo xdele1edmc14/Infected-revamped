@@ -41,7 +41,7 @@ class ParticipantDamageListenerTest {
         listener.onParticipantDamage(event);
 
         verify(event).setCancelled(true);
-        verify(gameManager, never()).infectPlayer(victim, true);
+        verify(gameManager, never()).infectPlayer(victim, attacker, true);
     }
 
     @Test
@@ -54,7 +54,7 @@ class ParticipantDamageListenerTest {
         listener.onParticipantDamage(event);
 
         verify(event).setCancelled(true);
-        verify(gameManager, never()).infectPlayer(victim, true);
+        verify(gameManager, never()).infectPlayer(victim, attacker, true);
     }
 
     @Test
@@ -69,7 +69,7 @@ class ParticipantDamageListenerTest {
         listener.onParticipantDamage(event);
 
         verify(event).setCancelled(true);
-        verify(gameManager, never()).infectPlayer(victim, true);
+        verify(gameManager, never()).infectPlayer(victim, attacker, true);
     }
 
     @Test
@@ -82,7 +82,7 @@ class ParticipantDamageListenerTest {
         listener.onParticipantDamage(event);
 
         verify(event, never()).setCancelled(true);
-        verify(gameManager).infectPlayer(victim, true);
+        verify(gameManager).infectPlayer(victim, attacker, true);
     }
 
     @Test
@@ -94,7 +94,7 @@ class ParticipantDamageListenerTest {
 
         listener.onParticipantDamage(event);
 
-        verify(gameManager, never()).infectPlayer(victim, true);
+        verify(gameManager, never()).infectPlayer(victim, attacker, true);
     }
 
     private EntityDamageByEntityEvent event(
