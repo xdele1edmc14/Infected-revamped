@@ -29,12 +29,23 @@ public final class AdminGuiManager implements AdminGuiNavigator, AdminGuiClickHa
     private final GameManager gameManager;
     private final AdminSetupService setupService;
     private final AdminEventActions eventActions;
+    private final java.util.function.Consumer<Player> weaponMenuOpener;
+    private final java.util.function.Supplier<List<String>> weaponLootReloader;
 
     public AdminGuiManager(InfectedPlugin plugin, GameManager gameManager, AdminSetupService setupService) {
+        this(plugin, gameManager, setupService,
+                player -> player.sendMessage(ChatColor.YELLOW + "Weapon chest setup is unavailable."), List::of);
+    }
+
+    public AdminGuiManager(InfectedPlugin plugin, GameManager gameManager, AdminSetupService setupService,
+                           java.util.function.Consumer<Player> weaponMenuOpener,
+                           java.util.function.Supplier<List<String>> weaponLootReloader) {
         this.plugin = Objects.requireNonNull(plugin, "plugin");
         this.gameManager = Objects.requireNonNull(gameManager, "gameManager");
         this.setupService = Objects.requireNonNull(setupService, "setupService");
         this.eventActions = new AdminEventActions(plugin, gameManager, setupService);
+        this.weaponMenuOpener = Objects.requireNonNull(weaponMenuOpener, "weaponMenuOpener");
+        this.weaponLootReloader = Objects.requireNonNull(weaponLootReloader, "weaponLootReloader");
     }
 
     @Override
@@ -117,13 +128,22 @@ public final class AdminGuiManager implements AdminGuiNavigator, AdminGuiClickHa
                 "",
                 ChatColor.AQUA + "Click: " + ChatColor.GRAY + "Reload"
         ));
+        menu.setItem(AdminGuiLayout.RANDOM_WEAPON_CHESTS, AdminGuiItems.item(
+                Material.CHEST,
+                ChatColor.GOLD,
+                "Random Weapon Chests",
+                ChatColor.GRAY + "Select the arena chest region,",
+                ChatColor.GRAY + "configure guns, ammo, and grenades.",
+                "",
+                ChatColor.AQUA + "Click: " + ChatColor.GRAY + "Open weapon wizard"
+        ));
         menu.setItem(AdminGuiLayout.QUICK_HELP, AdminGuiItems.item(
                 Material.BOOK,
                 ChatColor.AQUA,
                 "Quick Help",
                 ChatColor.GRAY + "View the four-step setup guide.",
-                ChatColor.GRAY + "This is an event control desk,",
-                ChatColor.GRAY + "not a gameplay configuration editor.",
+                ChatColor.GRAY + "Round controls stay compact;",
+                ChatColor.GRAY + "weapon loot has its own wizard.",
                 "",
                 ChatColor.AQUA + "Click: " + ChatColor.GRAY + "Open guide"
         ));
@@ -392,9 +412,9 @@ public final class AdminGuiManager implements AdminGuiNavigator, AdminGuiClickHa
         menu.setItem(31, AdminGuiItems.item(
                 Material.LECTERN,
                 ChatColor.YELLOW,
-                "Control Desk Only",
+                "Control Desk and Setup",
                 ChatColor.GRAY + "This GUI controls setup and event actions.",
-                ChatColor.GRAY + "It does not edit gameplay rules or balancing."
+                ChatColor.GRAY + "Weapon loot uses its separate wizard."
         ));
         addStandardFooter(menu, true, false);
         player.openInventory(menu);
@@ -423,6 +443,7 @@ public final class AdminGuiManager implements AdminGuiNavigator, AdminGuiClickHa
             case AdminGuiLayout.START_EVENT -> requestStart(player);
             case AdminGuiLayout.STOP_EVENT -> requestStop(player);
             case AdminGuiLayout.RELOAD_CONFIG -> reload(player);
+            case AdminGuiLayout.RANDOM_WEAPON_CHESTS -> weaponMenuOpener.accept(player);
             case AdminGuiLayout.QUICK_HELP -> openHelp(player);
             case AdminGuiLayout.MAIN_CLOSE -> player.closeInventory();
             default -> {
@@ -653,9 +674,14 @@ public final class AdminGuiManager implements AdminGuiNavigator, AdminGuiClickHa
             return;
         }
         plugin.reloadConfig();
+        List<String> weaponErrors = weaponLootReloader.get();
         String message = plugin.getConfig().getString("messages.config-reloaded",
                 "&aInfected plugin configuration reloaded!");
         player.sendMessage(ChatColor.translateAlternateColorCodes('&', message));
+        if (!weaponErrors.isEmpty()) {
+            player.sendMessage(ChatColor.YELLOW + "Weapon loot configuration reloaded with errors:");
+            weaponErrors.forEach(error -> player.sendMessage(ChatColor.RED + "- " + error));
+        }
         openMain(player);
     }
 

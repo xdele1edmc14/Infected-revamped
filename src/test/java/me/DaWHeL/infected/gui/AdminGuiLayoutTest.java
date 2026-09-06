@@ -17,6 +17,7 @@ class AdminGuiLayoutTest {
                 () -> assertEquals(20, AdminGuiLayout.START_EVENT),
                 () -> assertEquals(22, AdminGuiLayout.STOP_EVENT),
                 () -> assertEquals(24, AdminGuiLayout.RELOAD_CONFIG),
+                () -> assertEquals(31, AdminGuiLayout.RANDOM_WEAPON_CHESTS),
                 () -> assertEquals(27, AdminGuiLayout.MAIN_BACK),
                 () -> assertEquals(34, AdminGuiLayout.QUICK_HELP),
                 () -> assertEquals(35, AdminGuiLayout.MAIN_CLOSE)

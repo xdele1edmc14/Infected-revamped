@@ -5,10 +5,7 @@ import me.DaWHeL.infected.Roles.Survivor;
 import org.bukkit.ChatColor;
 import org.bukkit.GameMode;
 import org.bukkit.Location;
-import org.bukkit.Material;
 import org.bukkit.entity.Player;
-import org.bukkit.inventory.ItemStack;
-import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.potion.PotionEffect;
 import org.bukkit.potion.PotionEffectType;
 import org.bukkit.scheduler.BukkitTask;
@@ -16,7 +13,6 @@ import org.bukkit.scheduler.BukkitTask;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.EnumSet;
-import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -25,6 +21,7 @@ import java.util.Objects;
 import java.util.Random;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.BooleanSupplier;
 
 public class GameManager {
     private final InfectedPlugin plugin;
@@ -43,12 +40,12 @@ public class GameManager {
     private final Set<UUID> queuedPlayers = new LinkedHashSet<>();
     private final Set<UUID> roundTeleportBypass = new LinkedHashSet<>();
     private final Set<BukkitTask> roundTasks = new LinkedHashSet<>();
-    private final Map<UUID, Long> featherCooldown = new HashMap<>();
 
     private RoundPhase phase = RoundPhase.LOBBY;
     private boolean buffEnabled;
     private long roundId;
     private BukkitTask cleanupTask;
+    private BooleanSupplier roundStartAllowed = () -> true;
 
     public GameManager(InfectedPlugin plugin) {
         this(
@@ -99,6 +96,10 @@ public class GameManager {
 
     public RoundPhase getPhase() {
         return phase;
+    }
+
+    public void setRoundStartAllowed(BooleanSupplier roundStartAllowed) {
+        this.roundStartAllowed = Objects.requireNonNull(roundStartAllowed, "roundStartAllowed");
     }
 
     public boolean isGameRunning() {
@@ -188,6 +189,9 @@ public class GameManager {
     }
 
     public StartResult startGame() {
+        if (!roundStartAllowed.getAsBoolean()) {
+            return StartResult.rejected("Wait for the active chest operation to finish before starting a round.");
+        }
         if (phase != RoundPhase.LOBBY) {
             return StartResult.rejected("The Infected event is already running or cleaning up.");
         }
@@ -340,7 +344,6 @@ public class GameManager {
         cancelRoundTasks();
         containedInfected.clear();
         roundTeleportBypass.clear();
-        featherCooldown.clear();
 
         if (reason == EndReason.ADMIN_STOP) {
             broadcast(plugin.getConfig().getString(
@@ -579,7 +582,6 @@ public class GameManager {
         roundParticipants.remove(player.getUniqueId());
         containedInfected.remove(player.getUniqueId());
         roundTeleportBypass.remove(player.getUniqueId());
-        featherCooldown.remove(player.getUniqueId());
         return departedRole;
     }
 
@@ -638,43 +640,6 @@ public class GameManager {
         beginEnding(EndReason.WINNER, null);
     }
 
-    public void startFeatherTask() {
-        scheduler.runRepeating(() -> {
-            if (phase != RoundPhase.ACTIVE) {
-                return;
-            }
-            for (Player player : plugin.getServer().getOnlinePlayers()) {
-                if (roleOf(player) == ParticipantRole.NONE) {
-                    continue;
-                }
-                UUID uuid = player.getUniqueId();
-                if (player.getInventory().contains(Material.FEATHER) || featherCooldown.containsKey(uuid)) {
-                    continue;
-                }
-                ItemStack feather = new ItemStack(Material.FEATHER);
-                ItemMeta meta = feather.getItemMeta();
-                meta.setDisplayName("§bJump Feather");
-                meta.setLore(List.of("§eUse this if you're stuck!", "§eLaunches you high into the air."));
-                feather.setItemMeta(meta);
-                player.getInventory().addItem(feather);
-            }
-        }, 0L, 20L);
-    }
-
-    public void setFeatherCooldown(Player player, int seconds) {
-        featherCooldown.put(player.getUniqueId(), System.currentTimeMillis() + seconds * 1000L);
-        BukkitTask task = scheduler.runLater(
-                () -> featherCooldown.remove(player.getUniqueId()),
-                seconds * 20L
-        );
-        trackRoundTask(task);
-    }
-
-    public boolean isOnFeatherCooldown(Player player) {
-        Long expiry = featherCooldown.get(player.getUniqueId());
-        return expiry != null && System.currentTimeMillis() < expiry;
-    }
-
     public void shutdown() {
         roundId++;
         cancelRoundTasks();
@@ -689,7 +654,6 @@ public class GameManager {
         containedInfected.clear();
         roundTeleportBypass.clear();
         infectedLives.clear();
-        featherCooldown.clear();
         phase = RoundPhase.LOBBY;
     }
 

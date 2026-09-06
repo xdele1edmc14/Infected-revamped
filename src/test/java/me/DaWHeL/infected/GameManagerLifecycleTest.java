@@ -35,7 +35,6 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doCallRealMethod;
 import static org.mockito.Mockito.doNothing;
-import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -131,6 +130,17 @@ class GameManagerLifecycleTest {
         );
         verify(teleportManager, never()).teleportPlayersBatch(
                 any(SpawnRole.class), anyList(), anyInt(), anyLong(), any(), any());
+    }
+
+    @Test
+    void activeChestMutationLeasePreventsARoundFromStartingMidOperation() {
+        gameManager.setRoundStartAllowed(() -> false);
+
+        StartResult result = gameManager.startGame();
+
+        assertFalse(result.success());
+        assertTrue(result.message().contains("chest operation"));
+        assertEquals(RoundPhase.LOBBY, gameManager.getPhase());
     }
 
     @Test
@@ -446,47 +456,6 @@ class GameManagerLifecycleTest {
                 () -> assertEquals(RoundPhase.ENDING, gameManager.getPhase()),
                 () -> assertTrue(gameManager.isEliminatedInfected(finalInfected))
         );
-    }
-
-    @Test
-    void featherTaskInspectsOnlyActiveParticipantsAndStopsDuringEnding() {
-        startActiveRound(3, 1);
-        List<Player> activePlayers = new ArrayList<>();
-        gameManager.getSurvivors().forEach(role -> activePlayers.add(role.getPlayer()));
-        gameManager.getInfected().forEach(role -> activePlayers.add(role.getPlayer()));
-        Player queued = player("queued-feather");
-        assertTrue(gameManager.queueLateJoin(queued));
-        List<Player> onlinePlayers = new ArrayList<>(activePlayers);
-        onlinePlayers.add(queued);
-        org.mockito.Mockito.doReturn(onlinePlayers).when(server).getOnlinePlayers();
-        for (Player player : activePlayers) {
-            PlayerInventory inventory = player.getInventory();
-            org.mockito.Mockito.doReturn(true).when(inventory).contains(org.bukkit.Material.FEATHER);
-        }
-        PlayerInventory queuedInventory = queued.getInventory();
-        org.mockito.Mockito.doThrow(new AssertionError("Queued spectators must not receive feathers."))
-                .when(queuedInventory).contains(org.bukkit.Material.FEATHER);
-
-        gameManager.startFeatherTask();
-        org.mockito.ArgumentCaptor<Runnable> featherTask = org.mockito.ArgumentCaptor.forClass(Runnable.class);
-        verify(scheduler).runRepeating(featherTask.capture(),
-                org.mockito.ArgumentMatchers.eq(0L), org.mockito.ArgumentMatchers.eq(20L));
-        assertDoesNotThrow(featherTask.getValue()::run);
-
-        verify(queuedInventory, never()).contains(org.bukkit.Material.FEATHER);
-
-        assertTrue(gameManager.stopGame());
-        for (Player player : activePlayers) {
-            PlayerInventory inventory = player.getInventory();
-            clearInvocations(inventory);
-            org.mockito.Mockito.doThrow(new AssertionError("ENDING players must not receive feathers."))
-                    .when(inventory).contains(org.bukkit.Material.FEATHER);
-        }
-        assertDoesNotThrow(featherTask.getValue()::run);
-
-        for (Player player : activePlayers) {
-            verify(player.getInventory(), never()).contains(org.bukkit.Material.FEATHER);
-        }
     }
 
     private void startActiveRound(int participants, int startingInfected) {

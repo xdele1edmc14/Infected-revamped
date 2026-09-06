@@ -23,7 +23,6 @@ public class HelpInfectedCommand implements CommandExecutor {
         sender.sendMessage(ChatColor.YELLOW + "/removeplayer <name>" + ChatColor.GRAY + " - Safely removes a player from the round");
         sender.sendMessage(ChatColor.YELLOW + "/createinfectedspawn" + ChatColor.GRAY + " - Sets zombie spawn at the beggining of the game");
         sender.sendMessage(ChatColor.YELLOW + "/tpinfectedspawn" + ChatColor.GRAY + " - Teleports you to the infected spawn point");
-        sender.sendMessage(ChatColor.YELLOW + "/givefeather" + ChatColor.GRAY + " - Gives you a test Jump Feather");
         sender.sendMessage(ChatColor.YELLOW + "/helpinfected" + ChatColor.GRAY + " - Shows this help menu");
         sender.sendMessage(ChatColor.GOLD + "------------------------------------------");
         return true;

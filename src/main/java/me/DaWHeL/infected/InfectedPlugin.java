@@ -6,6 +6,10 @@ import me.DaWHeL.infected.gui.AdminGuiListener;
 import me.DaWHeL.infected.gui.AdminGuiManager;
 import me.DaWHeL.infected.gui.AdminSetupService;
 import me.DaWHeL.infected.gui.InfectedAdminCommand;
+import me.DaWHeL.infected.gui.weapon.WeaponLootGuiListener;
+import me.DaWHeL.infected.gui.weapon.WeaponLootGuiManager;
+import me.DaWHeL.infected.loot.*;
+import me.DaWHeL.infected.localization.DeathTitleMessages;
 
 import org.bukkit.Bukkit;
 import org.bukkit.command.PluginCommand;
@@ -13,6 +17,7 @@ import org.bukkit.plugin.java.JavaPlugin;
 
 import java.util.Objects;
 import java.util.Random;
+import java.util.concurrent.atomic.AtomicReference;
 
 public final class InfectedPlugin extends JavaPlugin {
 
@@ -45,7 +50,29 @@ public final class InfectedPlugin extends JavaPlugin {
         );
 
         AdminSetupService adminSetupService = new AdminSetupService(this, spawnRepository);
-        AdminGuiManager adminGuiManager = new AdminGuiManager(this, gameManager, adminSetupService);
+        WeaponLootRepository weaponLootRepository = new WeaponLootRepository(getDataFolder(), new ItemSnapshotCodec());
+        weaponLootRepository.snapshot().errors().forEach(error ->
+                getLogger().warning("Weapon loot configuration: " + error));
+        WeaponSelectionListener weaponSelectionListener = new WeaponSelectionListener(this, weaponLootRepository);
+        WeaponChestService weaponChestService = new WeaponChestService(
+                gameManager,
+                weaponLootRepository::snapshot,
+                new ChestDiscoveryService(),
+                new ChestLootGenerator(new Random())
+        );
+        gameManager.setRoundStartAllowed(() -> !weaponChestService.isOperationActive());
+        AtomicReference<AdminGuiManager> adminGuiReference = new AtomicReference<>();
+        WeaponLootGuiManager weaponLootGuiManager = new WeaponLootGuiManager(
+                this, weaponLootRepository, weaponChestService, weaponSelectionListener,
+                player -> adminGuiReference.get().openMain(player));
+        AdminGuiManager adminGuiManager = new AdminGuiManager(
+                this, gameManager, adminSetupService, weaponLootGuiManager::openWizard,
+                () -> {
+                    java.util.List<String> errors = weaponLootRepository.reload();
+                    errors.forEach(error -> getLogger().warning("Weapon loot configuration: " + error));
+                    return errors;
+                });
+        adminGuiReference.set(adminGuiManager);
         InfectedAdminCommand infectedAdminCommand = new InfectedAdminCommand(
                 gameManager, adminSetupService, adminGuiManager);
 
@@ -68,7 +95,6 @@ public final class InfectedPlugin extends JavaPlugin {
         getCommand("helpinfected").setExecutor(new HelpInfectedCommand());
         getCommand("createinfectedspawn").setExecutor(new CreateInfectedSpawn(this));
         getCommand("tpinfectedspawn").setExecutor(new TpInfectedSpawn(this));
-        getCommand("givefeather").setExecutor(new GiveFeather());
 
         //Register Events
         Bukkit.getPluginManager().registerEvents(new ParticipantDamageListener(gameManager), this);
@@ -79,12 +105,11 @@ public final class InfectedPlugin extends JavaPlugin {
         getServer().getPluginManager().registerEvents(new InfectedInventoryLockListener(gameManager), this);
         getServer().getPluginManager().registerEvents(
                 new InfectedRespawnListener(gameManager, spawnRepository), this);
-        getServer().getPluginManager().registerEvents(new InfectedDeathListener(gameManager), this);
-        getServer().getPluginManager().registerEvents(new JumpFeatherListener(gameManager, this), this);
+        getServer().getPluginManager().registerEvents(
+                new InfectedDeathListener(gameManager, DeathTitleMessages.load(this)), this);
         getServer().getPluginManager().registerEvents(new AdminGuiListener(this, adminGuiManager), this);
-
-        // Start feather spawning
-        gameManager.startFeatherTask();
+        getServer().getPluginManager().registerEvents(weaponSelectionListener, this);
+        getServer().getPluginManager().registerEvents(new WeaponLootGuiListener(this, weaponLootGuiManager), this);
 
         Bukkit.getScheduler().runTaskTimer(this, () -> {
             gameManager.getScoreboardManager().updateScoreboard();

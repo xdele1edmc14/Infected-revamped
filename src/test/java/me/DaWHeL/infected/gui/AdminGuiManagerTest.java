@@ -20,9 +20,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.Mockito.*;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class AdminGuiManagerTest {
     private GameManager gameManager;
@@ -55,6 +57,18 @@ class AdminGuiManagerTest {
 
         verify(manager).openTeleportRoles(administrator);
         verify(manager, never()).openTeleportPoints(eq(administrator), anyInt());
+    }
+
+    @Test
+    void mainWeaponChestControlOpensTheDedicatedWizard() {
+        AtomicBoolean opened = new AtomicBoolean();
+        AdminGuiManager customManager = new AdminGuiManager(
+                plugin, gameManager, setupService, player -> opened.set(true), List::of);
+
+        customManager.handleClick(administrator, AdminMenuHolder.root(AdminMenuHolder.MenuType.MAIN),
+                AdminGuiLayout.RANDOM_WEAPON_CHESTS, ClickType.LEFT);
+
+        assertTrue(opened.get());
     }
 
     @Test

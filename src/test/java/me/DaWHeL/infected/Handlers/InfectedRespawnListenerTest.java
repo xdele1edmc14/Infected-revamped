@@ -13,6 +13,7 @@ import org.bukkit.WorldBorder;
 import org.bukkit.block.Block;
 import org.bukkit.entity.Player;
 import org.bukkit.event.player.PlayerRespawnEvent;
+import org.bukkit.inventory.PlayerInventory;
 import org.bukkit.scheduler.BukkitScheduler;
 import org.bukkit.util.BoundingBox;
 import org.junit.jupiter.api.BeforeEach;
@@ -21,6 +22,9 @@ import org.junit.jupiter.api.Test;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -35,12 +39,14 @@ class InfectedRespawnListenerTest {
     private PlayerRespawnEvent event;
     private BukkitScheduler scheduler;
     private me.DaWHeL.infected.InfectedPlugin plugin;
+    private RecordingPotionEffects potionEffects;
 
     @BeforeEach
     void setUp() {
         gameManager = mock(GameManager.class);
         spawnRepository = mock(SpawnRepository.class);
-        listener = new InfectedRespawnListener(gameManager, spawnRepository);
+        potionEffects = new RecordingPotionEffects();
+        listener = new InfectedRespawnListener(gameManager, spawnRepository, new java.util.Random(0), potionEffects);
         player = mock(Player.class);
         event = mock(PlayerRespawnEvent.class);
         when(event.getPlayer()).thenReturn(player);
@@ -55,9 +61,10 @@ class InfectedRespawnListenerTest {
     }
 
     @Test
-    void activeInfectedRespawnsUseOnlyTheRespawnRole() {
+    void activeInfectedWaitsBlindedAtHoldingSpawnThenReleasesAfterThreeSeconds() {
         World world = mock(World.class);
         WorldBorder border = mock(WorldBorder.class);
+        Location holding = new Location(world, 5.5, 80, 5.5);
         Location respawn = new Location(world, 20.5, 70, 30.5);
         Block ground = block(Material.STONE, false);
         Block feet = block(Material.AIR, true);
@@ -69,14 +76,40 @@ class InfectedRespawnListenerTest {
         when(world.getBlockAt(20, 69, 30)).thenReturn(ground);
         when(world.getBlockAt(20, 70, 30)).thenReturn(feet);
         when(world.getBlockAt(20, 71, 30)).thenReturn(head);
+        when(spawnRepository.loadedHoldingSpawn()).thenReturn(Optional.of(holding));
         when(spawnRepository.loadedLocations(SpawnRole.INFECTED_RESPAWN)).thenReturn(java.util.List.of(respawn));
         when(ground.getBoundingBox()).thenReturn(new BoundingBox(20, 69, 30, 21, 70, 31));
+        when(gameManager.currentRoundId()).thenReturn(7L);
+        when(player.isOnline()).thenReturn(true);
+        when(player.teleport(respawn)).thenReturn(true);
+        when(player.getInventory()).thenReturn(mock(PlayerInventory.class));
 
         listener.onPlayerRespawn(event);
 
-        verify(event).setRespawnLocation(respawn);
+        verify(event).setRespawnLocation(holding);
+        assertEquals(60, potionEffects.blindnessDurationTicks);
+        ArgumentCaptor<Runnable> release = ArgumentCaptor.forClass(Runnable.class);
+        verify(scheduler).runTaskLater(eq(plugin), release.capture(), eq(60L));
+
+        release.getValue().run();
+
+        assertTrue(potionEffects.blindnessRemoved);
+        assertTrue(potionEffects.loadoutApplied);
+        verify(player).teleport(respawn);
         verify(spawnRepository, never()).loadedLocations(SpawnRole.SURVIVOR);
         verify(spawnRepository, never()).loadedLocations(SpawnRole.INFECTED_RELEASE);
+    }
+
+    @Test
+    void cancelsRoundWhenTheHoldingSpawnIsUnavailable() {
+        when(spawnRepository.loadedHoldingSpawn()).thenReturn(Optional.empty());
+
+        listener.onPlayerRespawn(event);
+
+        verify(gameManager).cancelForUnsafeInfectedRespawn();
+        verify(event, never()).setRespawnLocation(any());
+        verify(scheduler, never()).runTaskLater(any(), any(Runnable.class),
+                org.mockito.ArgumentMatchers.anyLong());
     }
 
     @Test
@@ -93,6 +126,7 @@ class InfectedRespawnListenerTest {
 
     @Test
     void cancelsRoundWhenNoSafeDedicatedRespawnPointIsAvailable() {
+        when(spawnRepository.loadedHoldingSpawn()).thenReturn(Optional.of(mock(Location.class)));
         when(spawnRepository.loadedLocations(SpawnRole.INFECTED_RESPAWN)).thenReturn(java.util.List.of());
 
         listener.onPlayerRespawn(event);
@@ -122,5 +156,27 @@ class InfectedRespawnListenerTest {
         when(block.getType()).thenReturn(material);
         when(block.isPassable()).thenReturn(passable);
         return block;
+    }
+
+    private static final class RecordingPotionEffects
+            implements InfectedRespawnListener.RespawnPotionEffects {
+        private int blindnessDurationTicks;
+        private boolean blindnessRemoved;
+        private boolean loadoutApplied;
+
+        @Override
+        public void applyBlindness(Player player, int durationTicks) {
+            blindnessDurationTicks = durationTicks;
+        }
+
+        @Override
+        public void removeBlindness(Player player) {
+            blindnessRemoved = true;
+        }
+
+        @Override
+        public void applyInfectedLoadout(Player player, boolean buffEnabled) {
+            loadoutApplied = true;
+        }
     }
 }
