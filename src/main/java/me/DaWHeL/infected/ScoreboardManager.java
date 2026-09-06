@@ -53,6 +53,7 @@ public class ScoreboardManager {
         List<String> lines = template.lines(role);
 
         Scoreboard scoreboard = Bukkit.getScoreboardManager().getNewScoreboard();
+        addSurvivorGlowTeam(scoreboard);
         Objective objective = scoreboard.registerNewObjective(
                 "infectedStats",
                 Criteria.DUMMY,
@@ -73,6 +74,16 @@ public class ScoreboardManager {
     }
 
     public void clearScoreboard(Player player) {
-        player.setScoreboard(Bukkit.getScoreboardManager().getNewScoreboard());
+        Scoreboard scoreboard = Bukkit.getScoreboardManager().getNewScoreboard();
+        addSurvivorGlowTeam(scoreboard);
+        player.setScoreboard(scoreboard);
+    }
+
+    private void addSurvivorGlowTeam(Scoreboard scoreboard) {
+        Team survivorGlow = scoreboard.registerNewTeam("survivor-glow");
+        survivorGlow.setColor(ChatColor.AQUA);
+        for (me.DaWHeL.infected.Roles.Survivor survivor : gameManager.getSurvivors()) {
+            survivorGlow.addEntry(survivor.getPlayer().getName());
+        }
     }
 }

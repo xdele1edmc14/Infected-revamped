@@ -22,15 +22,18 @@ public final class WeaponLootGuiManager {
     private final InfectedPlugin plugin;
     private final WeaponLootRepository repository;
     private final WeaponChestService chestService;
+    private final GeneratedChestService generatedChestService;
     private final WeaponSelectionListener selectionListener;
     private final Consumer<Player> openMain;
 
     public WeaponLootGuiManager(InfectedPlugin plugin, WeaponLootRepository repository,
-                                WeaponChestService chestService, WeaponSelectionListener selectionListener,
+                                WeaponChestService chestService, GeneratedChestService generatedChestService,
+                                WeaponSelectionListener selectionListener,
                                 Consumer<Player> openMain) {
         this.plugin = Objects.requireNonNull(plugin, "plugin");
         this.repository = Objects.requireNonNull(repository, "repository");
         this.chestService = Objects.requireNonNull(chestService, "chestService");
+        this.generatedChestService = Objects.requireNonNull(generatedChestService, "generatedChestService");
         this.selectionListener = Objects.requireNonNull(selectionListener, "selectionListener");
         this.openMain = Objects.requireNonNull(openMain, "openMain");
     }
@@ -75,14 +78,26 @@ public final class WeaponLootGuiManager {
                         ChatColor.AQUA + "Left/Right: " + ChatColor.GRAY + "+/- 100",
                         ChatColor.AQUA + "Shift Left/Right: " + ChatColor.GRAY + "+/- 500")));
         menu.setItem(32, chanceItem("Grenade Chance", catalog.settings().grenadeChance()));
+        menu.setItem(33, item(Material.CHEST,
+                ChatColor.YELLOW + "Generated Chest Count: " + ChatColor.WHITE
+                        + catalog.settings().generatedChestCount(),
+                List.of(ChatColor.AQUA + "Left/Right: " + ChatColor.GRAY + "+/- 10",
+                        ChatColor.AQUA + "Shift Left/Right: " + ChatColor.GRAY + "+/- 50",
+                        ChatColor.GRAY + "Supported range: 1-1,000")));
         WeaponChestService.ActionPreview clear = chestService.preview(WeaponChestService.ActionType.CLEAR);
         WeaponChestService.ActionPreview fill = fillPreview(catalog, clear);
+        GeneratedChestService.ActionPreview generate = generatedChestService.preview(
+                GeneratedChestService.ActionType.GENERATE);
+        GeneratedChestService.ActionPreview remove = generatedChestService.preview(
+                GeneratedChestService.ActionType.REMOVE);
         if (clear.success() && clear.chestCount() >= 0) {
             regionLore.add(ChatColor.GRAY + "Discovered chests: " + ChatColor.WHITE + clear.chestCount());
             menu.setItem(4, item(Material.MAP, ChatColor.AQUA + "Selected Chest Region", regionLore));
         }
-        menu.setItem(38, actionItem(Material.LIME_CONCRETE, "Fill Chests Now", fill));
-        menu.setItem(42, actionItem(Material.RED_CONCRETE, "Clear Chests", clear));
+        menu.setItem(37, actionItem(Material.GOLD_BLOCK, "Generate Layout", generate));
+        menu.setItem(39, actionItem(Material.LIME_CONCRETE, "Fill Loot", fill));
+        menu.setItem(41, actionItem(Material.HOPPER, "Empty Loot", clear));
+        menu.setItem(43, actionItem(Material.RED_CONCRETE, "Remove Generated", remove));
         menu.setItem(BACK, item(Material.ARROW, ChatColor.AQUA + "Back", List.of(ChatColor.GRAY + "Return to event control.")));
         menu.setItem(CLOSE, item(Material.BARRIER, ChatColor.RED + "Close", List.of()));
         menu.setItem(HELP, item(Material.BOOK, ChatColor.YELLOW + "Loot Rules", List.of(
@@ -177,7 +192,8 @@ public final class WeaponLootGuiManager {
                 case GRENADES -> catalogClick(player, holder, slot, false);
                 case GUN_EDITOR -> gunEditorClick(player, holder, slot, click);
                 case GRENADE_EDITOR -> grenadeEditorClick(player, holder, slot, click);
-                case CONFIRM_FILL, CONFIRM_CLEAR, CONFIRM_DELETE_GUN, CONFIRM_DELETE_GRENADE ->
+                case CONFIRM_GENERATE, CONFIRM_FILL, CONFIRM_CLEAR, CONFIRM_REMOVE,
+                     CONFIRM_DELETE_GUN, CONFIRM_DELETE_GRENADE ->
                         confirmationClick(player, holder, slot);
             }
         } catch (IllegalArgumentException | IllegalStateException exception) {
@@ -248,8 +264,12 @@ public final class WeaponLootGuiManager {
                 openWizard(player); }
             case 32 -> { repository.setChances(catalog.settings().secondGunChance(),
                     adjust(catalog.settings().grenadeChance(), click, 0, 100)); openWizard(player); }
-            case 38 -> openActionConfirmation(player, WeaponMenuHolder.MenuType.CONFIRM_FILL);
-            case 42 -> openActionConfirmation(player, WeaponMenuHolder.MenuType.CONFIRM_CLEAR);
+            case 33 -> { repository.setGeneratedChestCount(adjustGeneratedChestCount(
+                    catalog.settings().generatedChestCount(), click)); openWizard(player); }
+            case 37 -> openActionConfirmation(player, WeaponMenuHolder.MenuType.CONFIRM_GENERATE);
+            case 39 -> openActionConfirmation(player, WeaponMenuHolder.MenuType.CONFIRM_FILL);
+            case 41 -> openActionConfirmation(player, WeaponMenuHolder.MenuType.CONFIRM_CLEAR);
+            case 43 -> openActionConfirmation(player, WeaponMenuHolder.MenuType.CONFIRM_REMOVE);
             case BACK -> openMain.accept(player);
             case CLOSE -> player.closeInventory();
             default -> { }
@@ -295,19 +315,35 @@ public final class WeaponLootGuiManager {
     }
 
     private void openActionConfirmation(Player player, WeaponMenuHolder.MenuType type) {
-        WeaponChestService.ActionType action = type == WeaponMenuHolder.MenuType.CONFIRM_FILL
-                ? WeaponChestService.ActionType.FILL : WeaponChestService.ActionType.CLEAR;
-        WeaponChestService.ActionPreview preview = chestService.preview(action);
-        if (!preview.success()) { sendErrors(player, preview.errors()); openWizard(player); return; }
+        List<String> errors;
+        int chestCount;
+        if (type == WeaponMenuHolder.MenuType.CONFIRM_GENERATE
+                || type == WeaponMenuHolder.MenuType.CONFIRM_REMOVE) {
+            GeneratedChestService.ActionType action = type == WeaponMenuHolder.MenuType.CONFIRM_GENERATE
+                    ? GeneratedChestService.ActionType.GENERATE : GeneratedChestService.ActionType.REMOVE;
+            GeneratedChestService.ActionPreview preview = generatedChestService.preview(action);
+            errors = preview.errors();
+            chestCount = type == WeaponMenuHolder.MenuType.CONFIRM_GENERATE
+                    ? repository.snapshot().settings().generatedChestCount() : preview.registeredChests();
+            if (!preview.success()) { sendErrors(player, errors); openWizard(player); return; }
+        } else {
+            WeaponChestService.ActionType action = type == WeaponMenuHolder.MenuType.CONFIRM_FILL
+                    ? WeaponChestService.ActionType.FILL : WeaponChestService.ActionType.CLEAR;
+            WeaponChestService.ActionPreview preview = chestService.preview(action);
+            errors = preview.errors();
+            chestCount = preview.chestCount();
+            if (!preview.success()) { sendErrors(player, errors); openWizard(player); return; }
+        }
         WeaponLootCatalog catalog = repository.snapshot();
-        Inventory menu = create(WeaponMenuHolder.confirmation(type, regionKey(catalog)), 27,
+        String expectedState = type == WeaponMenuHolder.MenuType.CONFIRM_GENERATE
+                ? generationKey(catalog) : regionKey(catalog);
+        Inventory menu = create(WeaponMenuHolder.confirmation(type, expectedState), 27,
                 ChatColor.DARK_GRAY + "Confirm Chest Action");
         fillAll(menu, Material.GRAY_STAINED_GLASS_PANE);
         menu.setItem(11, item(Material.LIME_CONCRETE, ChatColor.GREEN + "Confirm", List.of(
-                ChatColor.GRAY + "Chests are discovered safely during the operation.")));
-        menu.setItem(13, item(type == WeaponMenuHolder.MenuType.CONFIRM_FILL ? Material.CHEST : Material.HOPPER,
-                ChatColor.YELLOW + (type == WeaponMenuHolder.MenuType.CONFIRM_FILL ? "Fresh Fill" : "Complete Clear"),
-                confirmationRegionLore(catalog, preview.chestCount())));
+                ChatColor.GRAY + confirmationDescription(type))));
+        menu.setItem(13, item(confirmationMaterial(type), ChatColor.YELLOW + confirmationName(type),
+                confirmationRegionLore(catalog, chestCount)));
         menu.setItem(15, item(Material.RED_CONCRETE, ChatColor.RED + "Cancel", List.of()));
         player.openInventory(menu);
     }
@@ -334,9 +370,20 @@ public final class WeaponLootGuiManager {
             openWizard(player);
             return;
         }
+        if (holder.type() == WeaponMenuHolder.MenuType.CONFIRM_GENERATE
+                && !Objects.equals(holder.expectedState(), generationKey(repository.snapshot()))) {
+            player.sendMessage(ChatColor.YELLOW
+                    + "The selected region or generated chest count changed while confirmation was open. Review it again.");
+            openWizard(player);
+            return;
+        }
         switch (holder.type()) {
+            case CONFIRM_GENERATE -> startGeneratedAction(
+                    player, GeneratedChestService.ActionType.GENERATE, "generated");
             case CONFIRM_FILL -> startAction(player, WeaponChestService.ActionType.FILL, "filled");
-            case CONFIRM_CLEAR -> startAction(player, WeaponChestService.ActionType.CLEAR, "cleared");
+            case CONFIRM_CLEAR -> startAction(player, WeaponChestService.ActionType.CLEAR, "emptied");
+            case CONFIRM_REMOVE -> startGeneratedAction(
+                    player, GeneratedChestService.ActionType.REMOVE, "removed");
             case CONFIRM_DELETE_GUN -> {
                 if (repository.removeGun(holder.target())) player.sendMessage(ChatColor.GREEN + "Gun and its ammo link deleted.");
                 else player.sendMessage(ChatColor.YELLOW + "That gun was already removed.");
@@ -356,6 +403,19 @@ public final class WeaponLootGuiManager {
         player.sendMessage(ChatColor.YELLOW
                 + "Scanning generated chunks in small batches. Missing terrain will not be generated...");
         chestService.executeAsync(plugin, action, result -> reportAction(player, result, verb));
+    }
+
+    private void startGeneratedAction(Player player, GeneratedChestService.ActionType action, String verb) {
+        player.closeInventory();
+        player.sendMessage(ChatColor.YELLOW + (action == GeneratedChestService.ActionType.GENERATE
+                ? "Finding safe outdoor chest sites in small batches..."
+                : "Restoring registered generated chest sites in small batches..."));
+        generatedChestService.executeAsync(plugin, action, result -> {
+            if (result.success()) player.sendMessage(ChatColor.GREEN + "Successfully " + verb + " "
+                    + result.affectedChests() + " chest structures.");
+            else sendErrors(player, result.errors());
+            openWizard(player);
+        });
     }
 
     private void reportAction(Player player, WeaponChestService.ActionResult result, String verb) {
@@ -411,8 +471,38 @@ public final class WeaponLootGuiManager {
         }
         return lore;
     }
+    private static Material confirmationMaterial(WeaponMenuHolder.MenuType type) {
+        return switch (type) {
+            case CONFIRM_GENERATE -> Material.GOLD_BLOCK;
+            case CONFIRM_FILL -> Material.CHEST;
+            case CONFIRM_CLEAR -> Material.HOPPER;
+            case CONFIRM_REMOVE -> Material.LAVA_BUCKET;
+            default -> Material.PAPER;
+        };
+    }
+    private static String confirmationName(WeaponMenuHolder.MenuType type) {
+        return switch (type) {
+            case CONFIRM_GENERATE -> "Regenerate Outdoor Layout";
+            case CONFIRM_FILL -> "Fresh Loot Fill";
+            case CONFIRM_CLEAR -> "Empty Eligible Inventories";
+            case CONFIRM_REMOVE -> "Remove Plugin-Owned Layout";
+            default -> "Chest Action";
+        };
+    }
+    private static String confirmationDescription(WeaponMenuHolder.MenuType type) {
+        return switch (type) {
+            case CONFIRM_GENERATE -> "The previous plugin layout will be restored and replaced.";
+            case CONFIRM_FILL, CONFIRM_CLEAR -> "Only tagged or exact 3x3-gold chests are eligible.";
+            case CONFIRM_REMOVE -> "Only registry-owned generated structures will be restored.";
+            default -> "Review this action before continuing.";
+        };
+    }
     private static String regionKey(WeaponLootCatalog catalog) {
         return String.valueOf(catalog.point1()) + '|' + catalog.point2();
+    }
+
+    private static String generationKey(WeaponLootCatalog catalog) {
+        return regionKey(catalog) + "|generated=" + catalog.settings().generatedChestCount();
     }
 
     private Inventory create(WeaponMenuHolder holder, int size, String title) {
@@ -445,11 +535,20 @@ public final class WeaponLootGuiManager {
         lore.add(""); lore.add(ChatColor.AQUA + "Click: " + ChatColor.GRAY + "Review and confirm");
         return item(material, (preview.success() ? ChatColor.GREEN : ChatColor.RED) + name, lore);
     }
+    private static ItemStack actionItem(Material material, String name, GeneratedChestService.ActionPreview preview) {
+        List<String> lore = new ArrayList<>();
+        if (preview.success()) lore.add(ChatColor.GREEN + "Ready. Registered layout: "
+                + preview.registeredChests() + " chests.");
+        else preview.errors().forEach(error -> lore.add(ChatColor.RED + error));
+        lore.add(""); lore.add(ChatColor.AQUA + "Click: " + ChatColor.GRAY + "Review and confirm");
+        return item(material, (preview.success() ? ChatColor.GREEN : ChatColor.RED) + name, lore);
+    }
     private static String pointLine(String label, BlockPoint point) { return point == null ? ChatColor.GRAY + label + ": " + ChatColor.RED + "Not set" : ChatColor.GRAY + label + ": " + ChatColor.WHITE + point.x() + ", " + point.y() + ", " + point.z() + " (" + point.world() + ")"; }
     private static long dimension(int min, int max) { return (long) max - min + 1L; }
     private static ChatColor rarityColor(LootRarity rarity) { return switch (rarity) { case COMMON -> ChatColor.WHITE; case UNCOMMON -> ChatColor.GREEN; case RARE -> ChatColor.BLUE; case EPIC -> ChatColor.DARK_PURPLE; case LEGENDARY -> ChatColor.GOLD; }; }
     private static int adjust(int value, ClickType click, int min, int max) { int step = click.isShiftClick() ? 25 : 5; if (max <= 64) step = click.isShiftClick() ? 5 : 1; return Math.max(min, Math.min(max, value + (click.isLeftClick() ? step : -step))); }
     private static int adjustChunks(int value, ClickType click) { int step = click.isShiftClick() ? 500 : 100; return Math.max(1, Math.min(WeaponLootCatalog.Settings.MAX_CONFIGURED_CHUNKS, value + (click.isLeftClick() ? step : -step))); }
+    private static int adjustGeneratedChestCount(int value, ClickType click) { int step = click.isShiftClick() ? 50 : 10; return Math.max(1, Math.min(WeaponLootCatalog.Settings.MAX_GENERATED_CHESTS, value + (click.isLeftClick() ? step : -step))); }
     private static int clampPage(int requested, int size) { int pages = Math.max(1, (size + 35) / 36); return Math.max(0, Math.min(requested, pages - 1)); }
     private static <T> List<T> entriesForPage(List<T> list, int page) { int first = page * 36; return list.subList(first, Math.min(first + 36, list.size())); }
     private static Map<Integer, UUID> targets(List<UUID> ids, int page) { Map<Integer, UUID> map = new HashMap<>(); int first = page * 36; for (int i = first; i < Math.min(first + 36, ids.size()); i++) map.put(9 + i - first, ids.get(i)); return map; }

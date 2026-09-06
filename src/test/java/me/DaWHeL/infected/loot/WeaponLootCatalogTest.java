@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.*;
 
@@ -33,5 +34,18 @@ class WeaponLootCatalogTest {
     void chunkLimitCannotExceedFiveThousand() {
         assertThrows(IllegalArgumentException.class,
                 () -> new WeaponLootCatalog.Settings(10, 25, 5_001));
+    }
+
+    @Test
+    void generatedChestCountMustStayWithinSupportedRange() {
+        assertAll(
+                () -> assertThrows(IllegalArgumentException.class,
+                        () -> new WeaponLootCatalog.Settings(10, 25, 2_000_000L, 5_000, 0)),
+                () -> assertThrows(IllegalArgumentException.class,
+                        () -> new WeaponLootCatalog.Settings(10, 25, 2_000_000L, 5_000, 1_001)),
+                () -> assertEquals(1_000,
+                        new WeaponLootCatalog.Settings(10, 25, 2_000_000L, 5_000, 1_000)
+                                .generatedChestCount())
+        );
     }
 }

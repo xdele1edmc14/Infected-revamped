@@ -11,7 +11,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 
@@ -22,14 +21,21 @@ public final class WeaponChestService {
     private final Supplier<WeaponLootCatalog> catalogSupplier;
     private final ChestDiscoveryService discovery;
     private final ChestLootGenerator generator;
-    private final AtomicBoolean active = new AtomicBoolean();
+    private final ChestOperationGate operationGate;
 
     public WeaponChestService(GameManager gameManager, Supplier<WeaponLootCatalog> catalogSupplier,
                               ChestDiscoveryService discovery, ChestLootGenerator generator) {
+        this(gameManager, catalogSupplier, discovery, generator, new ChestOperationGate());
+    }
+
+    public WeaponChestService(GameManager gameManager, Supplier<WeaponLootCatalog> catalogSupplier,
+                              ChestDiscoveryService discovery, ChestLootGenerator generator,
+                              ChestOperationGate operationGate) {
         this.gameManager = Objects.requireNonNull(gameManager, "gameManager");
         this.catalogSupplier = Objects.requireNonNull(catalogSupplier, "catalogSupplier");
         this.discovery = Objects.requireNonNull(discovery, "discovery");
         this.generator = Objects.requireNonNull(generator, "generator");
+        this.operationGate = Objects.requireNonNull(operationGate, "operationGate");
     }
 
     public ActionPreview preview(ActionType action) {
@@ -46,26 +52,27 @@ public final class WeaponChestService {
     }
 
     public boolean isOperationActive() {
-        return active.get();
+        return operationGate.isActive();
     }
 
     public void executeAsync(Plugin plugin, ActionType action, Consumer<ActionResult> completion) {
         Objects.requireNonNull(plugin, "plugin");
         Objects.requireNonNull(action, "action");
         Objects.requireNonNull(completion, "completion");
-        if (!active.compareAndSet(false, true)) {
+        ChestOperationGate.Lease lease = operationGate.tryAcquire();
+        if (lease == null) {
             completion.accept(ActionResult.failure("A chest operation is already running."));
             return;
         }
         Configuration validation = validateConfiguration(action);
         if (!validation.errors.isEmpty()) {
-            active.set(false);
+            lease.close();
             completion.accept(new ActionResult(false, 0, validation.errors));
             return;
         }
         World world = discovery.world(validation.region.world());
         if (world == null) {
-            active.set(false);
+            lease.close();
             completion.accept(ActionResult.failure("Selected world is not loaded: " + validation.region.world()));
             return;
         }
@@ -76,20 +83,21 @@ public final class WeaponChestService {
         Runnable tick = () -> {
             if (!operation.step(CHUNKS_PER_TICK, CHESTS_PER_TICK)) return;
             scheduled[0].cancel();
-            active.set(false);
+            lease.close();
             completion.accept(operation.result());
         };
         try {
             scheduled[0] = plugin.getServer().getScheduler().runTaskTimer(plugin, tick, 1L, 1L);
         } catch (RuntimeException exception) {
-            active.set(false);
+            lease.close();
             completion.accept(ActionResult.failure("Could not schedule chest operation: " + exception.getMessage()));
         }
     }
 
     private ActionResult execute(ActionType action) {
-        if (!active.compareAndSet(false, true)) return ActionResult.failure("A chest operation is already running.");
-        try {
+        ChestOperationGate.Lease lease = operationGate.tryAcquire();
+        if (lease == null) return ActionResult.failure("A chest operation is already running.");
+        try (lease) {
             Configuration configuration = validateConfiguration(action);
             if (!configuration.errors.isEmpty()) return new ActionResult(false, 0, configuration.errors);
             ChestDiscoveryService.DiscoveryResult discovered = discovery.discover(configuration.region);
@@ -111,8 +119,6 @@ public final class WeaponChestService {
                 plans.get(i).forEach((slot, item) -> inventory.setItem(slot, item.clone()));
             }
             return ActionResult.success(discovered.chests().size());
-        } finally {
-            active.set(false);
         }
     }
 

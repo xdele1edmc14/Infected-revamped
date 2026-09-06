@@ -54,6 +54,20 @@ class WeaponLootRepositoryTest {
     }
 
     @Test
+    void generatedChestCountDefaultsToOneHundredAndPersistsGuiChanges() {
+        WeaponLootRepository repository = new WeaponLootRepository(
+                directory.toFile(), mock(ItemSnapshotCodec.class));
+
+        assertEquals(100, repository.snapshot().settings().generatedChestCount());
+
+        repository.setGeneratedChestCount(175);
+        WeaponLootRepository reloaded = new WeaponLootRepository(
+                directory.toFile(), mock(ItemSnapshotCodec.class));
+
+        assertEquals(175, reloaded.snapshot().settings().generatedChestCount());
+    }
+
+    @Test
     void unrelatedSavePreservesMalformedEntriesAndTheirValidationErrors() throws Exception {
         String invalidId = "00000000-0000-0000-0000-000000000001";
         Files.writeString(directory.resolve("weapon-loot.yml"), """

@@ -65,6 +65,30 @@ scoreboard:
 
 # Messages
 messages:
+  get-ready:
+    title: "&e&lGET READY!"
+    subtitle: ""
+    fade-in: 10
+    stay: 40
+    fade-out: 10
+  infected-release-countdown:
+    title: "&e&l{time}"
+    subtitle: ""
+    fade-in: 0
+    stay: 20
+    fade-out: 0
+    sound: "block.note_block.hat"
+    volume: 1.0
+    pitch: 1.0
+  infection-started:
+    title: "&c&lINFECTION HAS STARTED!"
+    subtitle: ""
+    fade-in: 10
+    stay: 50
+    fade-out: 10
+    sound: "block.note_block.bell"
+    volume: 1.0
+    pitch: 0.5
   game-start: "&eThe Infected game has started with &c{zombies} &ezombies!"
   game-stop: "The Infected game has been stopped!"
   survivors-teleporting: "&bSurvivors are being teleported..."

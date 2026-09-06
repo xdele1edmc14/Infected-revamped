@@ -19,7 +19,7 @@ import java.util.Set;
 
 public final class WeaponLootRepository {
     private static final WeaponLootCatalog.Settings DEFAULTS =
-            new WeaponLootCatalog.Settings(10, 25, 2_000_000L, 5_000);
+            new WeaponLootCatalog.Settings(10, 25, 2_000_000L, 5_000, 100);
     private final File file;
     private final ItemSnapshotCodec codec;
     private BlockPoint point1;
@@ -93,7 +93,8 @@ public final class WeaponLootRepository {
                     yaml.getInt("settings.second-gun-chance", 10),
                     yaml.getInt("settings.grenade-chance", 25),
                     2_000_000L,
-                    yaml.getInt("settings.max-chunks", 5_000));
+                    yaml.getInt("settings.max-chunks", 5_000),
+                    yaml.getInt("settings.generated-chest-count", 100));
         } catch (IllegalArgumentException exception) {
             loadBlocked = true;
             errors.add("Invalid global loot settings: " + exception.getMessage());
@@ -120,14 +121,21 @@ public final class WeaponLootRepository {
     public synchronized void setChances(int secondGunChance, int grenadeChance) {
         ensureWritable();
         settings = new WeaponLootCatalog.Settings(secondGunChance, grenadeChance,
-                settings.maxVolume(), settings.maxChunks());
+                settings.maxVolume(), settings.maxChunks(), settings.generatedChestCount());
         save();
     }
 
     public synchronized void setMaxChunks(int maxChunks) {
         ensureWritable();
         settings = new WeaponLootCatalog.Settings(settings.secondGunChance(), settings.grenadeChance(),
-                settings.maxVolume(), maxChunks);
+                settings.maxVolume(), maxChunks, settings.generatedChestCount());
+        save();
+    }
+
+    public synchronized void setGeneratedChestCount(int generatedChestCount) {
+        ensureWritable();
+        settings = new WeaponLootCatalog.Settings(settings.secondGunChance(), settings.grenadeChance(),
+                settings.maxVolume(), settings.maxChunks(), generatedChestCount);
         save();
     }
 
@@ -281,6 +289,7 @@ public final class WeaponLootRepository {
             yaml.set("settings.grenade-chance", settings.grenadeChance());
             yaml.set("settings.max-volume", null);
             yaml.set("settings.max-chunks", settings.maxChunks());
+            yaml.set("settings.generated-chest-count", settings.generatedChestCount());
             removedGunIds.forEach(id -> yaml.set("guns." + id, null));
             removedGrenadeIds.forEach(id -> yaml.set("grenades." + id, null));
             for (WeaponLootCatalog.GunEntry gun : guns) {

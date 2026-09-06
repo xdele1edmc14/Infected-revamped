@@ -3,6 +3,7 @@ package me.DaWHeL.infected.loot;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.Material;
+import org.bukkit.NamespacedKey;
 import org.bukkit.World;
 import org.bukkit.block.Block;
 import org.bukkit.block.BlockState;
@@ -23,13 +24,23 @@ import java.util.function.Predicate;
 
 public class ChestDiscoveryService {
     private final Function<String, World> worldLookup;
+    private final Predicate<Chest> eligibility;
 
     public ChestDiscoveryService() {
-        this(Bukkit::getWorld);
+        this(Bukkit::getWorld, chest -> true);
+    }
+
+    public ChestDiscoveryService(NamespacedKey generatedChestKey) {
+        this(Bukkit::getWorld, new ChestEligibility(generatedChestKey)::isEligible);
     }
 
     ChestDiscoveryService(Function<String, World> worldLookup) {
+        this(worldLookup, chest -> true);
+    }
+
+    ChestDiscoveryService(Function<String, World> worldLookup, Predicate<Chest> eligibility) {
         this.worldLookup = Objects.requireNonNull(worldLookup, "worldLookup");
+        this.eligibility = Objects.requireNonNull(eligibility, "eligibility");
     }
 
     public DiscoveryResult discover(ChestRegion region) {
@@ -57,6 +68,7 @@ public class ChestDiscoveryService {
                 && region.contains(block.getX(), block.getY(), block.getZ());
         for (BlockState state : chunk.getTileEntities(chestInRegion, false)) {
             if (!(state instanceof Chest chest)) continue;
+            if (!eligibility.test(chest)) continue;
             Inventory inventory = inventoryInsideRegion(region, chest);
             String key = canonicalKey(chest, inventory);
             found.putIfAbsent(key, new DiscoveredChest(key, inventory));
@@ -66,12 +78,16 @@ public class ChestDiscoveryService {
         return result;
     }
 
-    private static Inventory inventoryInsideRegion(ChestRegion region, Chest chest) {
+    private Inventory inventoryInsideRegion(ChestRegion region, Chest chest) {
         Inventory inventory = chest.getInventory();
         if (!(inventory.getHolder() instanceof DoubleChest doubleChest)) return inventory;
-        if (holderInside(region, doubleChest.getLeftSide())
-                && holderInside(region, doubleChest.getRightSide())) return inventory;
+        if (holderInsideAndEligible(region, doubleChest.getLeftSide())
+                && holderInsideAndEligible(region, doubleChest.getRightSide())) return inventory;
         return chest.getBlockInventory();
+    }
+
+    private boolean holderInsideAndEligible(ChestRegion region, InventoryHolder holder) {
+        return holder instanceof Chest chest && holderInside(region, holder) && eligibility.test(chest);
     }
 
     private static boolean holderInside(ChestRegion region, InventoryHolder holder) {

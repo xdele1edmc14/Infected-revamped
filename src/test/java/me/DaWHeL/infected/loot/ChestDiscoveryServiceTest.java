@@ -127,6 +127,33 @@ class ChestDiscoveryServiceTest {
         assertSame(selectedHalf, result.chests().getFirst().inventory());
     }
 
+    @Test
+    void anIneligibleDoubleChestHalfIsNeverExposedThroughTheEligibleHalf() {
+        World world = mock(World.class);
+        Chunk chunk = mock(Chunk.class);
+        Chest eligible = chestAt(3, 60, 4);
+        Chest manual = chestAt(4, 60, 4);
+        Inventory combined = mock(Inventory.class);
+        Inventory eligibleHalf = mock(Inventory.class);
+        DoubleChest holder = mock(DoubleChest.class);
+        when(eligible.getInventory()).thenReturn(combined);
+        when(eligible.getBlockInventory()).thenReturn(eligibleHalf);
+        when(manual.getInventory()).thenReturn(combined);
+        when(combined.getHolder()).thenReturn(holder);
+        when(holder.getLeftSide()).thenReturn(eligible);
+        when(holder.getRightSide()).thenReturn(manual);
+        when(world.isChunkLoaded(0, 0)).thenReturn(true);
+        when(world.getChunkAt(0, 0)).thenReturn(chunk);
+        when(chunk.getTileEntities(any(), eq(false))).thenReturn(List.of(eligible, manual));
+
+        ChestDiscoveryService service = new ChestDiscoveryService(name -> world, chest -> chest == eligible);
+        ChestDiscoveryService.DiscoveryResult result = service.discover(region);
+
+        assertTrue(result.success());
+        assertEquals(1, result.chests().size());
+        assertSame(eligibleHalf, result.chests().getFirst().inventory());
+    }
+
     private static Chest chestAt(int x, int y, int z) {
         Chest chest = mock(Chest.class);
         Inventory inventory = mock(Inventory.class);

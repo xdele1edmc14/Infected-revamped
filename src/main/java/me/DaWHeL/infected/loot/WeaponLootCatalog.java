@@ -31,11 +31,17 @@ public record WeaponLootCatalog(
         return grenades.stream().map(GrenadeEntry::copy).toList();
     }
 
-    public record Settings(int secondGunChance, int grenadeChance, long maxVolume, int maxChunks) {
+    public record Settings(int secondGunChance, int grenadeChance, long maxVolume, int maxChunks,
+                           int generatedChestCount) {
         public static final int MAX_CONFIGURED_CHUNKS = 5_000;
+        public static final int MAX_GENERATED_CHESTS = 1_000;
 
         public Settings(int secondGunChance, int grenadeChance, int maxChunks) {
-            this(secondGunChance, grenadeChance, 2_000_000L, maxChunks);
+            this(secondGunChance, grenadeChance, 2_000_000L, maxChunks, 100);
+        }
+
+        public Settings(int secondGunChance, int grenadeChance, long maxVolume, int maxChunks) {
+            this(secondGunChance, grenadeChance, maxVolume, maxChunks, 100);
         }
 
         public Settings {
@@ -45,6 +51,9 @@ public record WeaponLootCatalog(
             if (secondGunChance < 0 || secondGunChance > 100 || grenadeChance < 0 || grenadeChance > 100
                     || maxVolume < 1) {
                 throw new IllegalArgumentException("Invalid weapon-loot settings.");
+            }
+            if (generatedChestCount < 1 || generatedChestCount > MAX_GENERATED_CHESTS) {
+                throw new IllegalArgumentException("Generated chest count must be between 1 and 1,000.");
             }
         }
     }

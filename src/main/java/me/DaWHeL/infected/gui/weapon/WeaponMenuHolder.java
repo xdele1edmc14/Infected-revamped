@@ -43,6 +43,7 @@ public final class WeaponMenuHolder implements InventoryHolder {
     public UUID slotTarget(int slot) { return slotTargets.get(slot); }
     @Override public @NotNull Inventory getInventory() { return Objects.requireNonNull(inventory, "Menu is not bound."); }
 
-    public enum MenuType { WIZARD, GUNS, GUN_EDITOR, GRENADES, GRENADE_EDITOR, CONFIRM_FILL, CONFIRM_CLEAR,
+    public enum MenuType { WIZARD, GUNS, GUN_EDITOR, GRENADES, GRENADE_EDITOR,
+        CONFIRM_GENERATE, CONFIRM_FILL, CONFIRM_CLEAR, CONFIRM_REMOVE,
         CONFIRM_DELETE_GUN, CONFIRM_DELETE_GRENADE }
 }

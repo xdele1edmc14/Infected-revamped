@@ -101,7 +101,7 @@ public final class InfectedRespawnListener implements Listener {
                 || gameManager.roleOf(player) != ParticipantRole.INFECTED) {
             return;
         }
-        if (!player.teleport(respawn)) {
+        if (!gameManager.teleportInfectedToRespawn(player, respawn)) {
             player.sendMessage(ChatColor.RED
                     + "Your infected respawn was cancelled. The round is being cancelled.");
             gameManager.cancelForUnsafeInfectedRespawn();

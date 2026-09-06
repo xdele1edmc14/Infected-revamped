@@ -12,6 +12,7 @@ import me.DaWHeL.infected.loot.*;
 import me.DaWHeL.infected.localization.DeathTitleMessages;
 
 import org.bukkit.Bukkit;
+import org.bukkit.NamespacedKey;
 import org.bukkit.command.PluginCommand;
 import org.bukkit.plugin.java.JavaPlugin;
 
@@ -53,22 +54,33 @@ public final class InfectedPlugin extends JavaPlugin {
         WeaponLootRepository weaponLootRepository = new WeaponLootRepository(getDataFolder(), new ItemSnapshotCodec());
         weaponLootRepository.snapshot().errors().forEach(error ->
                 getLogger().warning("Weapon loot configuration: " + error));
+        GeneratedChestRepository generatedChestRepository = new GeneratedChestRepository(getDataFolder());
+        generatedChestRepository.errors().forEach(error ->
+                getLogger().warning("Generated chest configuration: " + error));
+        NamespacedKey generatedChestKey = new NamespacedKey(this, "generated-weapon-chest");
+        ChestOperationGate chestOperationGate = new ChestOperationGate();
         WeaponSelectionListener weaponSelectionListener = new WeaponSelectionListener(this, weaponLootRepository);
         WeaponChestService weaponChestService = new WeaponChestService(
                 gameManager,
                 weaponLootRepository::snapshot,
-                new ChestDiscoveryService(),
-                new ChestLootGenerator(new Random())
+                new ChestDiscoveryService(generatedChestKey),
+                new ChestLootGenerator(new Random()),
+                chestOperationGate
         );
-        gameManager.setRoundStartAllowed(() -> !weaponChestService.isOperationActive());
+        GeneratedChestService generatedChestService = new GeneratedChestService(
+                gameManager, weaponLootRepository::snapshot, generatedChestRepository,
+                new OutdoorChestSiteValidator(), generatedChestKey, chestOperationGate);
+        gameManager.setRoundStartAllowed(() -> !chestOperationGate.isActive());
         AtomicReference<AdminGuiManager> adminGuiReference = new AtomicReference<>();
         WeaponLootGuiManager weaponLootGuiManager = new WeaponLootGuiManager(
-                this, weaponLootRepository, weaponChestService, weaponSelectionListener,
+                this, weaponLootRepository, weaponChestService, generatedChestService, weaponSelectionListener,
                 player -> adminGuiReference.get().openMain(player));
         AdminGuiManager adminGuiManager = new AdminGuiManager(
                 this, gameManager, adminSetupService, weaponLootGuiManager::openWizard,
                 () -> {
                     java.util.List<String> errors = weaponLootRepository.reload();
+                    errors = new java.util.ArrayList<>(errors);
+                    errors.addAll(generatedChestRepository.reload());
                     errors.forEach(error -> getLogger().warning("Weapon loot configuration: " + error));
                     return errors;
                 });

@@ -177,6 +177,12 @@ public class GameManager {
         return player != null && roundTeleportBypass.contains(player.getUniqueId());
     }
 
+    public boolean teleportInfectedToRespawn(Player player, Location destination) {
+        Objects.requireNonNull(player, "player");
+        Objects.requireNonNull(destination, "destination");
+        return teleportWithContainmentBypass(player, destination);
+    }
+
     public boolean isQueued(Player player) {
         return player != null && queuedPlayers.contains(player.getUniqueId());
     }
@@ -233,6 +239,18 @@ public class GameManager {
             }
         }
 
+        showRoundTitle(
+                "messages.get-ready",
+                "&e&lGET READY!",
+                "",
+                10,
+                40,
+                10,
+                null,
+                1.0f,
+                1.0f
+        );
+
         broadcast(plugin.getConfig().getString(
                 "messages.game-start",
                 "&eThe Infected game has started with &c{zombies} &ezombies!"
@@ -268,16 +286,43 @@ public class GameManager {
         }
 
         transitionTo(RoundPhase.HEADSTART);
-        int delaySeconds = plugin.getConfig().getInt("settings.infected-teleport-delay", 10);
+        int delaySeconds = Math.max(3,
+                plugin.getConfig().getInt("settings.infected-teleport-delay", 10));
         broadcast(plugin.getConfig().getString(
                 "messages.zombies-teleporting",
                 "&cInfected zombies will be teleported in &e{time} &cseconds..."
         ).replace("{time}", String.valueOf(delaySeconds)));
+        for (int countdown = 3; countdown >= 1; countdown--) {
+            int displayedSecond = countdown;
+            BukkitTask countdownTask = scheduler.runLater(
+                    () -> showInfectedReleaseCountdown(expectedRound, displayedSecond),
+                    (delaySeconds - countdown) * 20L
+            );
+            trackRoundTask(countdownTask);
+        }
         BukkitTask delay = scheduler.runLater(
                 () -> beginInfectedRelease(expectedRound),
                 delaySeconds * 20L
         );
         trackRoundTask(delay);
+    }
+
+    private void showInfectedReleaseCountdown(long expectedRound, int second) {
+        if (!isCurrentRound(expectedRound, RoundPhase.HEADSTART)) {
+            return;
+        }
+        showRoundTitle(
+                "messages.infected-release-countdown",
+                "&e&l{time}",
+                "",
+                0,
+                20,
+                0,
+                "block.note_block.hat",
+                1.0f,
+                1.0f,
+                String.valueOf(second)
+        );
     }
 
     private void beginInfectedRelease(long expectedRound) {
@@ -319,6 +364,17 @@ public class GameManager {
 
         containedInfected.clear();
         transitionTo(RoundPhase.ACTIVE);
+        showRoundTitle(
+                "messages.infection-started",
+                "&c&lINFECTION HAS STARTED!",
+                "",
+                10,
+                50,
+                10,
+                "block.note_block.bell",
+                1.0f,
+                0.5f
+        );
         checkWin();
     }
 
@@ -424,6 +480,7 @@ public class GameManager {
         player.teleport(player.getWorld().getSpawnLocation());
         player.getInventory().clear();
         player.getInventory().setArmorContents(null);
+        player.getInventory().setHelmet(null);
         for (PotionEffect effect : player.getActivePotionEffects()) {
             player.removePotionEffect(effect.getType());
         }
@@ -821,6 +878,57 @@ public class GameManager {
 
     private void broadcast(String message) {
         plugin.getServer().broadcastMessage(color(message));
+    }
+
+    private void showRoundTitle(
+            String configPath,
+            String defaultTitle,
+            String defaultSubtitle,
+            int defaultFadeIn,
+            int defaultStay,
+            int defaultFadeOut,
+            String defaultSound,
+            float defaultVolume,
+            float defaultPitch
+    ) {
+        showRoundTitle(configPath, defaultTitle, defaultSubtitle, defaultFadeIn, defaultStay,
+                defaultFadeOut, defaultSound, defaultVolume, defaultPitch, null);
+    }
+
+    private void showRoundTitle(
+            String configPath,
+            String defaultTitle,
+            String defaultSubtitle,
+            int defaultFadeIn,
+            int defaultStay,
+            int defaultFadeOut,
+            String defaultSound,
+            float defaultVolume,
+            float defaultPitch,
+            String countdownSecond
+    ) {
+        String title = plugin.getConfig().getString(configPath + ".title", defaultTitle);
+        String subtitle = plugin.getConfig().getString(configPath + ".subtitle", defaultSubtitle);
+        if (countdownSecond != null) {
+            title = title.replace("{time}", countdownSecond);
+            subtitle = subtitle.replace("{time}", countdownSecond);
+        }
+        int fadeIn = plugin.getConfig().getInt(configPath + ".fade-in", defaultFadeIn);
+        int stay = plugin.getConfig().getInt(configPath + ".stay", defaultStay);
+        int fadeOut = plugin.getConfig().getInt(configPath + ".fade-out", defaultFadeOut);
+        String sound = plugin.getConfig().getString(configPath + ".sound", defaultSound);
+        float volume = (float) plugin.getConfig().getDouble(configPath + ".volume", defaultVolume);
+        float pitch = (float) plugin.getConfig().getDouble(configPath + ".pitch", defaultPitch);
+
+        for (Player player : roundParticipants.values()) {
+            if (!player.isOnline()) {
+                continue;
+            }
+            player.sendTitle(color(title), color(subtitle), fadeIn, stay, fadeOut);
+            if (sound != null && !sound.isBlank()) {
+                player.playSound(player.getLocation(), sound, volume, pitch);
+            }
+        }
     }
 
     private String color(String input) {

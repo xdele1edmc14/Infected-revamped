@@ -81,7 +81,7 @@ class InfectedRespawnListenerTest {
         when(ground.getBoundingBox()).thenReturn(new BoundingBox(20, 69, 30, 21, 70, 31));
         when(gameManager.currentRoundId()).thenReturn(7L);
         when(player.isOnline()).thenReturn(true);
-        when(player.teleport(respawn)).thenReturn(true);
+        when(gameManager.teleportInfectedToRespawn(player, respawn)).thenReturn(true);
         when(player.getInventory()).thenReturn(mock(PlayerInventory.class));
 
         listener.onPlayerRespawn(event);
@@ -95,7 +95,7 @@ class InfectedRespawnListenerTest {
 
         assertTrue(potionEffects.blindnessRemoved);
         assertTrue(potionEffects.loadoutApplied);
-        verify(player).teleport(respawn);
+        verify(gameManager).teleportInfectedToRespawn(player, respawn);
         verify(spawnRepository, never()).loadedLocations(SpawnRole.SURVIVOR);
         verify(spawnRepository, never()).loadedLocations(SpawnRole.INFECTED_RELEASE);
     }

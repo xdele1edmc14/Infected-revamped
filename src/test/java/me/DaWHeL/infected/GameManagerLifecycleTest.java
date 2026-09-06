@@ -13,6 +13,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.EnumMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -35,8 +36,10 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doCallRealMethod;
 import static org.mockito.Mockito.doNothing;
+import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -51,6 +54,7 @@ class GameManagerLifecycleTest {
     private ParticipantRoleFactory roleFactory;
     private Map<SpawnRole, Consumer<TeleportBatchResult>> completions;
     private Runnable[] delayedRelease;
+    private Map<Long, Runnable> scheduledTasks;
     private List<World> retainedWorlds;
     private Consumer<Player> beforeReleaseTeleport;
     private BiConsumer<Player, Boolean> afterReleaseTeleport;
@@ -87,6 +91,7 @@ class GameManagerLifecycleTest {
                 invocation.getArgument(0)));
         completions = new EnumMap<>(SpawnRole.class);
         delayedRelease = new Runnable[1];
+        scheduledTasks = new LinkedHashMap<>();
         retainedWorlds = new ArrayList<>();
         doAnswer(invocation -> {
             SpawnRole role = invocation.getArgument(0);
@@ -103,6 +108,7 @@ class GameManagerLifecycleTest {
                 any(SpawnRole.class), anyList(), anyInt(), anyLong(), any(), any(), any(), any());
         doAnswer(invocation -> {
             delayedRelease[0] = invocation.getArgument(0);
+            scheduledTasks.put(invocation.getArgument(1), invocation.getArgument(0));
             return mock(BukkitTask.class);
         }).when(scheduler).runLater(any(Runnable.class), anyLong());
     }
@@ -229,6 +235,199 @@ class GameManagerLifecycleTest {
                 () -> assertTrue(gameManager.getInfected().stream()
                         .noneMatch(infected -> gameManager.isContainedInfected(infected.getPlayer())))
         );
+    }
+
+    @Test
+    void selectedSurvivorsAndInfectedSeeGetReadyWhenTheEventStarts() {
+        configureValidSetup(3, 1);
+        addLobbyPlayer("first");
+        addLobbyPlayer("second");
+        addLobbyPlayer("third");
+
+        assertTrue(gameManager.startGame().success());
+
+        for (Player participant : activeParticipants()) {
+            verify(participant).sendTitle("§e§lGET READY!", "", 10, 40, 10);
+        }
+    }
+
+    @Test
+    void finalThreeHeadStartSecondsShowTitlesAndPlayANoteblockSound() {
+        configureValidSetup(3, 1);
+        addLobbyPlayer("first");
+        addLobbyPlayer("second");
+        addLobbyPlayer("third");
+        assertTrue(gameManager.startGame().success());
+        List<Player> participants = activeParticipants();
+
+        completions.get(SpawnRole.SURVIVOR).accept(success(2));
+        scheduledTasks.get(140L).run();
+        scheduledTasks.get(160L).run();
+        scheduledTasks.get(180L).run();
+
+        for (Player participant : participants) {
+            verify(participant).sendTitle("§e§l3", "", 0, 20, 0);
+            verify(participant).sendTitle("§e§l2", "", 0, 20, 0);
+            verify(participant).sendTitle("§e§l1", "", 0, 20, 0);
+            verify(participant, times(3)).playSound(
+                    any(Location.class),
+                    org.mockito.ArgumentMatchers.eq("block.note_block.hat"),
+                    org.mockito.ArgumentMatchers.eq(1.0f),
+                    org.mockito.ArgumentMatchers.eq(1.0f)
+            );
+        }
+    }
+
+    @Test
+    void infectedReleaseAnnouncesActivePlayWithALowPitchedBell() {
+        configureValidSetup(3, 1);
+        addLobbyPlayer("first");
+        addLobbyPlayer("second");
+        addLobbyPlayer("third");
+        assertTrue(gameManager.startGame().success());
+        List<Player> participants = activeParticipants();
+        completions.get(SpawnRole.SURVIVOR).accept(success(2));
+
+        scheduledTasks.get(200L).run();
+        completions.get(SpawnRole.INFECTED_RELEASE).accept(success(1));
+
+        for (Player participant : participants) {
+            verify(participant).sendTitle("§c§lINFECTION HAS STARTED!", "", 10, 50, 10);
+            verify(participant).playSound(
+                    any(Location.class),
+                    org.mockito.ArgumentMatchers.eq("block.note_block.bell"),
+                    org.mockito.ArgumentMatchers.eq(1.0f),
+                    org.mockito.ArgumentMatchers.eq(0.5f)
+            );
+        }
+    }
+
+    @Test
+    void infectedReleaseDelayNeverCutsOffTheFullThreeSecondCountdown() {
+        configureValidSetup(3, 1);
+        config.set("settings.infected-teleport-delay", 1);
+        addLobbyPlayer("first");
+        addLobbyPlayer("second");
+        addLobbyPlayer("third");
+        assertTrue(gameManager.startGame().success());
+
+        completions.get(SpawnRole.SURVIVOR).accept(success(2));
+
+        assertAll(
+                () -> assertTrue(scheduledTasks.containsKey(0L)),
+                () -> assertTrue(scheduledTasks.containsKey(20L)),
+                () -> assertTrue(scheduledTasks.containsKey(40L)),
+                () -> assertTrue(scheduledTasks.containsKey(60L))
+        );
+    }
+
+    @Test
+    void staleCountdownDoesNotDisplayAfterTheRoundStops() {
+        configureValidSetup(3, 1);
+        addLobbyPlayer("first");
+        addLobbyPlayer("second");
+        addLobbyPlayer("third");
+        assertTrue(gameManager.startGame().success());
+        List<Player> participants = activeParticipants();
+        completions.get(SpawnRole.SURVIVOR).accept(success(2));
+        Runnable staleCountdown = scheduledTasks.get(140L);
+        clearInvocations(participants.toArray());
+
+        assertTrue(gameManager.stopGame());
+        staleCountdown.run();
+
+        for (Player participant : participants) {
+            verify(participant, never()).sendTitle("§e§l3", "", 0, 20, 0);
+            verify(participant, never()).playSound(
+                    any(Location.class),
+                    org.mockito.ArgumentMatchers.eq("block.note_block.hat"),
+                    org.mockito.ArgumentMatchers.eq(1.0f),
+                    org.mockito.ArgumentMatchers.eq(1.0f)
+            );
+        }
+    }
+
+    @Test
+    void failedInfectedReleaseNeverAnnouncesThatInfectionStarted() {
+        configureValidSetup(3, 1);
+        addLobbyPlayer("first");
+        addLobbyPlayer("second");
+        addLobbyPlayer("third");
+        assertTrue(gameManager.startGame().success());
+        List<Player> participants = activeParticipants();
+        completions.get(SpawnRole.SURVIVOR).accept(success(2));
+
+        scheduledTasks.get(200L).run();
+        for (Player participant : participants) {
+            verify(participant, never()).sendTitle("§c§lINFECTION HAS STARTED!", "", 10, 50, 10);
+        }
+        completions.get(SpawnRole.INFECTED_RELEASE).accept(new TeleportBatchResult(
+                1, 0, List.of(UUID.randomUUID()), null));
+
+        assertEquals(RoundPhase.ENDING, gameManager.getPhase());
+        for (Player participant : participants) {
+            verify(participant, never()).sendTitle("§c§lINFECTION HAS STARTED!", "", 10, 50, 10);
+            verify(participant, never()).playSound(
+                    any(Location.class),
+                    org.mockito.ArgumentMatchers.eq("block.note_block.bell"),
+                    org.mockito.ArgumentMatchers.eq(1.0f),
+                    org.mockito.ArgumentMatchers.eq(0.5f)
+            );
+        }
+    }
+
+    @Test
+    void preparationCountdownAndStartPresentationUseConfiguredValues() {
+        configureValidSetup(3, 1);
+        config.set("messages.get-ready.title", "&aPrepare");
+        config.set("messages.get-ready.subtitle", "&7Choose wisely");
+        config.set("messages.get-ready.fade-in", 1);
+        config.set("messages.get-ready.stay", 2);
+        config.set("messages.get-ready.fade-out", 3);
+        config.set("messages.infected-release-countdown.title", "&b{time}!");
+        config.set("messages.infected-release-countdown.subtitle", "&7Release in {time}");
+        config.set("messages.infected-release-countdown.fade-in", 4);
+        config.set("messages.infected-release-countdown.stay", 5);
+        config.set("messages.infected-release-countdown.fade-out", 6);
+        config.set("messages.infected-release-countdown.sound", "custom.tick");
+        config.set("messages.infected-release-countdown.volume", 0.4);
+        config.set("messages.infected-release-countdown.pitch", 1.2);
+        config.set("messages.infection-started.title", "&4Go");
+        config.set("messages.infection-started.subtitle", "&cRun");
+        config.set("messages.infection-started.fade-in", 7);
+        config.set("messages.infection-started.stay", 8);
+        config.set("messages.infection-started.fade-out", 9);
+        config.set("messages.infection-started.sound", "custom.bell");
+        config.set("messages.infection-started.volume", 0.6);
+        config.set("messages.infection-started.pitch", 0.3);
+        addLobbyPlayer("first");
+        addLobbyPlayer("second");
+        addLobbyPlayer("third");
+
+        assertTrue(gameManager.startGame().success());
+        List<Player> participants = activeParticipants();
+        completions.get(SpawnRole.SURVIVOR).accept(success(2));
+        scheduledTasks.get(140L).run();
+        scheduledTasks.get(200L).run();
+        completions.get(SpawnRole.INFECTED_RELEASE).accept(success(1));
+
+        for (Player participant : participants) {
+            verify(participant).sendTitle("§aPrepare", "§7Choose wisely", 1, 2, 3);
+            verify(participant).sendTitle("§b3!", "§7Release in 3", 4, 5, 6);
+            verify(participant).playSound(
+                    any(Location.class),
+                    org.mockito.ArgumentMatchers.eq("custom.tick"),
+                    org.mockito.ArgumentMatchers.eq(0.4f),
+                    org.mockito.ArgumentMatchers.eq(1.2f)
+            );
+            verify(participant).sendTitle("§4Go", "§cRun", 7, 8, 9);
+            verify(participant).playSound(
+                    any(Location.class),
+                    org.mockito.ArgumentMatchers.eq("custom.bell"),
+                    org.mockito.ArgumentMatchers.eq(0.6f),
+                    org.mockito.ArgumentMatchers.eq(0.3f)
+            );
+        }
     }
 
     @Test
@@ -379,8 +578,9 @@ class GameManagerLifecycleTest {
     }
 
     @Test
-    void resetPlayerStateRestoresTheNeutralPlayerListName() {
+    void resetPlayerStateClearsInventoryHelmetAndRestoresTheNeutralPlayerListName() {
         Player player = player("neutral-list-name");
+        PlayerInventory inventory = player.getInventory();
         World world = mock(World.class);
         when(player.getWorld()).thenReturn(world);
         when(world.getSpawnLocation()).thenReturn(new Location(world, 0.5, 64, 0.5));
@@ -389,6 +589,8 @@ class GameManagerLifecycleTest {
         gameManager.resetPlayerState(player);
 
         verify(player).setPlayerListName("neutral-list-name");
+        verify(inventory).clear();
+        verify(inventory).setHelmet(null);
     }
 
     @Test
@@ -488,6 +690,21 @@ class GameManagerLifecycleTest {
         assertEquals(0, gameManager.kills(survivor));
     }
 
+    @Test
+    void infectedRespawnTeleportTemporarilyBypassesCageContainment() {
+        startActiveRound(2, 1);
+        Player infected = gameManager.getInfected().getFirst().getPlayer();
+        Location destination = safeLocation();
+        when(infected.teleport(destination)).thenAnswer(invocation -> {
+            assertTrue(gameManager.isRoundTeleportBypass(infected));
+            return true;
+        });
+
+        assertTrue(gameManager.teleportInfectedToRespawn(infected, destination));
+
+        assertFalse(gameManager.isRoundTeleportBypass(infected));
+    }
+
     private void startActiveRound(int participants, int startingInfected) {
         configureValidSetup(participants, startingInfected);
         for (int index = 0; index < participants; index++) {
@@ -498,6 +715,13 @@ class GameManagerLifecycleTest {
         delayedRelease[0].run();
         completions.get(SpawnRole.INFECTED_RELEASE).accept(success(startingInfected));
         assertEquals(RoundPhase.ACTIVE, gameManager.getPhase());
+    }
+
+    private List<Player> activeParticipants() {
+        List<Player> participants = new ArrayList<>();
+        gameManager.getSurvivors().forEach(role -> participants.add(role.getPlayer()));
+        gameManager.getInfected().forEach(role -> participants.add(role.getPlayer()));
+        return participants;
     }
 
     private void configureValidSetup(int participants, int startingInfected) {
@@ -550,6 +774,7 @@ class GameManagerLifecycleTest {
         when(player.getName()).thenReturn(name);
         when(player.isOnline()).thenReturn(true);
         when(player.teleport(any(Location.class))).thenReturn(true);
+        when(player.getLocation()).thenReturn(mock(Location.class));
         when(player.getInventory()).thenReturn(mock(PlayerInventory.class));
         when(player.getActivePotionEffects()).thenReturn(Set.of());
         return player;

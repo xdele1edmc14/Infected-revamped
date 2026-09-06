@@ -25,7 +25,7 @@ public class Infected {
     }
 
     private void setup(boolean announce) {
-        player.setGlowing(true);
+        player.setGlowing(false);
         player.getInventory().clear();
         player.getInventory().setArmorContents(null);
         player.getInventory().setHelmet(new ItemStack(Material.ZOMBIE_HEAD));

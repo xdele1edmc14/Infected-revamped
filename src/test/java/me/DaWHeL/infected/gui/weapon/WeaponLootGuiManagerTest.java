@@ -2,6 +2,7 @@ package me.DaWHeL.infected.gui.weapon;
 
 import me.DaWHeL.infected.InfectedPlugin;
 import me.DaWHeL.infected.loot.BlockPoint;
+import me.DaWHeL.infected.loot.GeneratedChestService;
 import me.DaWHeL.infected.loot.WeaponChestService;
 import me.DaWHeL.infected.loot.WeaponLootCatalog;
 import me.DaWHeL.infected.loot.WeaponLootRepository;
@@ -21,6 +22,7 @@ import static org.mockito.Mockito.*;
 class WeaponLootGuiManagerTest {
     private WeaponLootRepository repository;
     private WeaponChestService chestService;
+    private GeneratedChestService generatedChestService;
     private WeaponLootGuiManager manager;
     private Player player;
 
@@ -28,10 +30,11 @@ class WeaponLootGuiManagerTest {
     void setUp() {
         repository = mock(WeaponLootRepository.class);
         chestService = mock(WeaponChestService.class);
+        generatedChestService = mock(GeneratedChestService.class);
         when(repository.snapshot()).thenReturn(catalog(
                 new BlockPoint("arena", 0, 60, 0), new BlockPoint("arena", 10, 70, 10)));
         manager = spy(new WeaponLootGuiManager(
-                mock(InfectedPlugin.class), repository, chestService,
+                mock(InfectedPlugin.class), repository, chestService, generatedChestService,
                 mock(WeaponSelectionListener.class), ignored -> { }));
         player = mock(Player.class);
         doNothing().when(manager).openWizard(any());
@@ -77,6 +80,20 @@ class WeaponLootGuiManagerTest {
     }
 
     @Test
+    void wizardRaisesGeneratedChestCountInFiftyChestStepsWithoutExceedingOneThousand() {
+        when(repository.snapshot()).thenReturn(new WeaponLootCatalog(
+                new BlockPoint("arena", 0, 60, 0), new BlockPoint("arena", 10, 70, 10),
+                new WeaponLootCatalog.Settings(10, 25, 2_000_000L, 4_750, 975),
+                List.of(), List.of(), List.of()));
+
+        manager.handleClick(player, WeaponMenuHolder.root(WeaponMenuHolder.MenuType.WIZARD),
+                33, ClickType.SHIFT_LEFT);
+
+        verify(repository).setGeneratedChestCount(1_000);
+        verify(manager).openWizard(player);
+    }
+
+    @Test
     void droppingACursorItemIntoTheGunInputRegistersAnExactCopyWithoutUsingMainHand() {
         ItemStack cursor = mock(ItemStack.class);
         ItemStack copy = mock(ItemStack.class);
@@ -92,7 +109,7 @@ class WeaponLootGuiManagerTest {
 
     @Test
     @SuppressWarnings("unchecked")
-    void confirmedClearStartsAStreamedOperationAndReopensWizardAfterCompletion() {
+    void confirmedEmptyStartsAStreamedOperationAndReopensWizardAfterCompletion() {
         WeaponMenuHolder confirmation = WeaponMenuHolder.confirmation(
                 WeaponMenuHolder.MenuType.CONFIRM_CLEAR,
                 "BlockPoint[world=arena, x=0, y=60, z=0]|BlockPoint[world=arena, x=10, y=70, z=10]");
@@ -107,7 +124,40 @@ class WeaponLootGuiManagerTest {
 
         completion.getValue().accept(new WeaponChestService.ActionResult(true, 3, List.of()));
 
-        verify(player).sendMessage(contains("Successfully cleared 3"));
+        verify(player).sendMessage(contains("Successfully emptied 3"));
+        verify(manager).openWizard(player);
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void confirmedGenerateStartsTheIndependentLayoutOperation() {
+        WeaponMenuHolder confirmation = WeaponMenuHolder.confirmation(
+                WeaponMenuHolder.MenuType.CONFIRM_GENERATE,
+                "BlockPoint[world=arena, x=0, y=60, z=0]|BlockPoint[world=arena, x=10, y=70, z=10]|generated=100");
+        var completion = org.mockito.ArgumentCaptor.forClass(Consumer.class);
+
+        manager.handleClick(player, confirmation, 11, ClickType.LEFT);
+
+        verify(generatedChestService).executeAsync(
+                any(), eq(GeneratedChestService.ActionType.GENERATE), completion.capture());
+        verify(player).closeInventory();
+
+        completion.getValue().accept(new GeneratedChestService.ActionResult(true, 100, List.of()));
+
+        verify(player).sendMessage(contains("generated 100"));
+        verify(manager).openWizard(player);
+    }
+
+    @Test
+    void changedGeneratedCountCannotExecuteAStaleGenerateConfirmation() {
+        WeaponMenuHolder confirmation = WeaponMenuHolder.confirmation(
+                WeaponMenuHolder.MenuType.CONFIRM_GENERATE,
+                "BlockPoint[world=arena, x=0, y=60, z=0]|BlockPoint[world=arena, x=10, y=70, z=10]|generated=90");
+
+        manager.handleClick(player, confirmation, 11, ClickType.LEFT);
+
+        verifyNoInteractions(generatedChestService);
+        verify(player).sendMessage(contains("count changed"));
         verify(manager).openWizard(player);
     }
 
