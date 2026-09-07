@@ -35,6 +35,8 @@ final class StreamedChestOperation {
     private Stage stage = Stage.SCAN;
     private int chestIndex;
     private int retainedChunkIndex;
+    private int scannedChunks;
+    private final int totalChunks;
     private WeaponChestService.ActionResult result;
 
     StreamedChestOperation(Plugin plugin, World world, ChestRegion region,
@@ -50,6 +52,7 @@ final class StreamedChestOperation {
         this.action = Objects.requireNonNull(action, "action");
         this.operationStillAllowed = Objects.requireNonNull(operationStillAllowed, "operationStillAllowed");
         this.chunks = region.chunkKeys(catalog.settings().maxChunks()).iterator();
+        this.totalChunks = Math.toIntExact(region.chunkCount());
     }
 
     boolean step(int chunkBudget, int chestBudget) {
@@ -78,6 +81,19 @@ final class StreamedChestOperation {
     WeaponChestService.ActionResult result() {
         if (stage != Stage.DONE) throw new IllegalStateException("Chest operation is still running.");
         return result;
+    }
+
+    ChestOperationProgress progress() {
+        return switch (stage) {
+            case SCAN -> new ChestOperationProgress("Scanning chunks", scannedChunks, totalChunks);
+            case RESCAN -> new ChestOperationProgress("Stabilizing chests", retainedChunkIndex,
+                    retainedChunks.size());
+            case PLAN -> new ChestOperationProgress("Planning loot", chestIndex, chests.size());
+            case APPLY -> new ChestOperationProgress(
+                    action == WeaponChestService.ActionType.FILL ? "Filling chests" : "Emptying chests",
+                    chestIndex, chests.size());
+            case DONE -> new ChestOperationProgress("Chest operation complete", 1, 1);
+        };
     }
 
     private void scan(int budget) {
@@ -133,6 +149,7 @@ final class StreamedChestOperation {
                 throw exception;
             }
             processed++;
+            scannedChunks++;
         }
         if (chunks.hasNext() || !pendingLoads.isEmpty() || stage == Stage.DONE) return;
         if (chests.isEmpty()) {

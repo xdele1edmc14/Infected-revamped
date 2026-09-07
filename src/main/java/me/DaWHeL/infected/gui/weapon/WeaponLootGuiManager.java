@@ -25,6 +25,7 @@ public final class WeaponLootGuiManager {
     private final GeneratedChestService generatedChestService;
     private final WeaponSelectionListener selectionListener;
     private final Consumer<Player> openMain;
+    private final Map<UUID, ChestOperationProgressBar> progressBars = new HashMap<>();
 
     public WeaponLootGuiManager(InfectedPlugin plugin, WeaponLootRepository repository,
                                 WeaponChestService chestService, GeneratedChestService generatedChestService,
@@ -402,7 +403,11 @@ public final class WeaponLootGuiManager {
         player.closeInventory();
         player.sendMessage(ChatColor.YELLOW
                 + "Scanning generated chunks in small batches. Missing terrain will not be generated...");
-        chestService.executeAsync(plugin, action, result -> reportAction(player, result, verb));
+        ChestOperationProgressBar progressBar = startProgress(player);
+        chestService.executeAsync(plugin, action, progressBar::update, result -> {
+            finishProgress(player, progressBar, result.success(), result.affectedChests());
+            reportAction(player, result, verb);
+        });
     }
 
     private void startGeneratedAction(Player player, GeneratedChestService.ActionType action, String verb) {
@@ -410,12 +415,32 @@ public final class WeaponLootGuiManager {
         player.sendMessage(ChatColor.YELLOW + (action == GeneratedChestService.ActionType.GENERATE
                 ? "Finding safe outdoor chest sites in small batches..."
                 : "Restoring registered generated chest sites in small batches..."));
-        generatedChestService.executeAsync(plugin, action, result -> {
+        ChestOperationProgressBar progressBar = startProgress(player);
+        generatedChestService.executeAsync(plugin, action, progressBar::update, result -> {
+            finishProgress(player, progressBar, result.success(), result.affectedChests());
             if (result.success()) player.sendMessage(ChatColor.GREEN + "Successfully " + verb + " "
                     + result.affectedChests() + " chest structures.");
             else sendErrors(player, result.errors());
             openWizard(player);
         });
+    }
+
+    private ChestOperationProgressBar startProgress(Player player) {
+        ChestOperationProgressBar progressBar = new ChestOperationProgressBar(plugin, player);
+        ChestOperationProgressBar previous = progressBars.put(player.getUniqueId(), progressBar);
+        if (previous != null) previous.close();
+        return progressBar;
+    }
+
+    private void finishProgress(Player player, ChestOperationProgressBar progressBar,
+                                boolean success, int affectedChests) {
+        progressBars.remove(player.getUniqueId(), progressBar);
+        progressBar.complete(success, affectedChests);
+    }
+
+    void closeProgress(Player player) {
+        ChestOperationProgressBar progressBar = progressBars.remove(player.getUniqueId());
+        if (progressBar != null) progressBar.close();
     }
 
     private void reportAction(Player player, WeaponChestService.ActionResult result, String verb) {

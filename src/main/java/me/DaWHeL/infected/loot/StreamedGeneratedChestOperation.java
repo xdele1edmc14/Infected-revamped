@@ -132,6 +132,24 @@ final class StreamedGeneratedChestOperation {
         return result;
     }
 
+    ChestOperationProgress progress() {
+        return switch (stage) {
+            case PLAN -> new ChestOperationProgress("Finding sites", sampler.sites().size(), targetCount);
+            case LOAD_OLD -> new ChestOperationProgress("Loading previous layout", oldLoadIndex,
+                    oldPlacements.size());
+            case PRECHECK_OLD -> new ChestOperationProgress("Checking previous layout", index,
+                    oldPlacements.size());
+            case VERIFY_NEW -> new ChestOperationProgress("Verifying sites", index, newSites.size());
+            case REMOVE_OLD -> new ChestOperationProgress("Restoring previous layout", index,
+                    oldPlacements.size());
+            case PREPARE_NEW -> new ChestOperationProgress("Preparing chest sites", index, newSites.size());
+            case PERSIST_PENDING -> new ChestOperationProgress("Saving recovery data", 0, 1);
+            case PLACE_NEW -> new ChestOperationProgress("Placing chests", index, newPlacements.size());
+            case PERSIST_ACTIVE -> new ChestOperationProgress("Saving generated layout", 0, 1);
+            case DONE -> new ChestOperationProgress("Chest operation complete", 1, 1);
+        };
+    }
+
     private void plan(int budget) {
         for (int processed = 0; processed < budget && !sampler.finished(); processed++) {
             if (pendingCandidate == null) {

@@ -56,8 +56,15 @@ public final class WeaponChestService {
     }
 
     public void executeAsync(Plugin plugin, ActionType action, Consumer<ActionResult> completion) {
+        executeAsync(plugin, action, ignored -> { }, completion);
+    }
+
+    public void executeAsync(Plugin plugin, ActionType action,
+                             Consumer<ChestOperationProgress> progress,
+                             Consumer<ActionResult> completion) {
         Objects.requireNonNull(plugin, "plugin");
         Objects.requireNonNull(action, "action");
+        Objects.requireNonNull(progress, "progress");
         Objects.requireNonNull(completion, "completion");
         ChestOperationGate.Lease lease = operationGate.tryAcquire();
         if (lease == null) {
@@ -81,12 +88,15 @@ public final class WeaponChestService {
                 () -> gameManager.getPhase() == RoundPhase.LOBBY);
         BukkitTask[] scheduled = new BukkitTask[1];
         Runnable tick = () -> {
-            if (!operation.step(CHUNKS_PER_TICK, CHESTS_PER_TICK)) return;
+            boolean finished = operation.step(CHUNKS_PER_TICK, CHESTS_PER_TICK);
+            progress.accept(operation.progress());
+            if (!finished) return;
             scheduled[0].cancel();
             lease.close();
             completion.accept(operation.result());
         };
         try {
+            progress.accept(operation.progress());
             scheduled[0] = plugin.getServer().getScheduler().runTaskTimer(plugin, tick, 1L, 1L);
         } catch (RuntimeException exception) {
             lease.close();

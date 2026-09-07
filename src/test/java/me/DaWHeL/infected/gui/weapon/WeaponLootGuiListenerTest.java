@@ -5,6 +5,7 @@ import org.bukkit.event.inventory.InventoryDragEvent;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryAction;
 import org.bukkit.event.inventory.ClickType;
+import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
@@ -16,6 +17,19 @@ import java.util.Map;
 import static org.mockito.Mockito.*;
 
 class WeaponLootGuiListenerTest {
+    @Test
+    void quittingRemovesTheAdminsOperationBossBar() {
+        InfectedPlugin plugin = mock(InfectedPlugin.class);
+        WeaponLootGuiManager manager = mock(WeaponLootGuiManager.class);
+        Player player = mock(Player.class);
+        PlayerQuitEvent event = mock(PlayerQuitEvent.class);
+        when(event.getPlayer()).thenReturn(player);
+
+        new WeaponLootGuiListener(plugin, manager).onQuit(event);
+
+        verify(manager).closeProgress(player);
+    }
+
     @Test
     void cancelsDraggingIntoAWeaponMenu() {
         InfectedPlugin plugin = mock(InfectedPlugin.class);

@@ -2,12 +2,17 @@ package me.DaWHeL.infected.gui.weapon;
 
 import me.DaWHeL.infected.InfectedPlugin;
 import me.DaWHeL.infected.loot.BlockPoint;
+import me.DaWHeL.infected.loot.ChestOperationProgress;
 import me.DaWHeL.infected.loot.GeneratedChestService;
 import me.DaWHeL.infected.loot.WeaponChestService;
 import me.DaWHeL.infected.loot.WeaponLootCatalog;
 import me.DaWHeL.infected.loot.WeaponLootRepository;
 import me.DaWHeL.infected.loot.WeaponSelectionListener;
 import org.bukkit.entity.Player;
+import org.bukkit.Server;
+import org.bukkit.boss.BarFlag;
+import org.bukkit.boss.BossBar;
+import org.bukkit.scheduler.BukkitScheduler;
 import org.bukkit.event.inventory.ClickType;
 import org.bukkit.inventory.ItemStack;
 import org.junit.jupiter.api.BeforeEach;
@@ -25,6 +30,8 @@ class WeaponLootGuiManagerTest {
     private GeneratedChestService generatedChestService;
     private WeaponLootGuiManager manager;
     private Player player;
+    private InfectedPlugin plugin;
+    private BossBar bossBar;
 
     @BeforeEach
     void setUp() {
@@ -33,8 +40,15 @@ class WeaponLootGuiManagerTest {
         generatedChestService = mock(GeneratedChestService.class);
         when(repository.snapshot()).thenReturn(catalog(
                 new BlockPoint("arena", 0, 60, 0), new BlockPoint("arena", 10, 70, 10)));
+        plugin = mock(InfectedPlugin.class);
+        Server server = mock(Server.class);
+        BukkitScheduler scheduler = mock(BukkitScheduler.class);
+        bossBar = mock(BossBar.class);
+        when(plugin.getServer()).thenReturn(server);
+        when(server.getScheduler()).thenReturn(scheduler);
+        when(server.createBossBar(anyString(), any(), any(), any(BarFlag[].class))).thenReturn(bossBar);
         manager = spy(new WeaponLootGuiManager(
-                mock(InfectedPlugin.class), repository, chestService, generatedChestService,
+                plugin, repository, chestService, generatedChestService,
                 mock(WeaponSelectionListener.class), ignored -> { }));
         player = mock(Player.class);
         doNothing().when(manager).openWizard(any());
@@ -114,13 +128,18 @@ class WeaponLootGuiManagerTest {
                 WeaponMenuHolder.MenuType.CONFIRM_CLEAR,
                 "BlockPoint[world=arena, x=0, y=60, z=0]|BlockPoint[world=arena, x=10, y=70, z=10]");
         var completion = org.mockito.ArgumentCaptor.forClass(Consumer.class);
+        var progress = org.mockito.ArgumentCaptor.forClass(Consumer.class);
 
         manager.handleClick(player, confirmation, 11, ClickType.LEFT);
 
-        verify(chestService).executeAsync(any(), eq(WeaponChestService.ActionType.CLEAR), completion.capture());
+        verify(chestService).executeAsync(any(), eq(WeaponChestService.ActionType.CLEAR),
+                progress.capture(), completion.capture());
         verify(player).closeInventory();
         verify(player).sendMessage(contains("Scanning"));
         verify(manager, never()).openWizard(player);
+
+        progress.getValue().accept(new ChestOperationProgress("Emptying chests", 2, 3));
+        verify(bossBar).setTitle("Emptying chests — 67% (2 / 3)");
 
         completion.getValue().accept(new WeaponChestService.ActionResult(true, 3, List.of()));
 
@@ -135,12 +154,17 @@ class WeaponLootGuiManagerTest {
                 WeaponMenuHolder.MenuType.CONFIRM_GENERATE,
                 "BlockPoint[world=arena, x=0, y=60, z=0]|BlockPoint[world=arena, x=10, y=70, z=10]|generated=100");
         var completion = org.mockito.ArgumentCaptor.forClass(Consumer.class);
+        var progress = org.mockito.ArgumentCaptor.forClass(Consumer.class);
 
         manager.handleClick(player, confirmation, 11, ClickType.LEFT);
 
         verify(generatedChestService).executeAsync(
-                any(), eq(GeneratedChestService.ActionType.GENERATE), completion.capture());
+                any(), eq(GeneratedChestService.ActionType.GENERATE),
+                progress.capture(), completion.capture());
         verify(player).closeInventory();
+
+        progress.getValue().accept(new ChestOperationProgress("Finding sites", 42, 100));
+        verify(bossBar).setTitle("Finding sites — 42% (42 / 100)");
 
         completion.getValue().accept(new GeneratedChestService.ActionResult(true, 100, List.of()));
 

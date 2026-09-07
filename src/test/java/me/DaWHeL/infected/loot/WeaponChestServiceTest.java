@@ -19,6 +19,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.ArrayList;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -188,10 +189,11 @@ class WeaponChestServiceTest {
         when(discovery.discover(any(ChestRegion.class), eq(chunk))).thenReturn(
                 List.of(new DiscoveredChest("chest", inventory)));
         AtomicReference<WeaponChestService.ActionResult> completed = new AtomicReference<>();
+        List<ChestOperationProgress> progress = new ArrayList<>();
         WeaponChestService service = new WeaponChestService(
                 game, () -> catalog, discovery, mock(ChestLootGenerator.class));
 
-        service.executeAsync(plugin, WeaponChestService.ActionType.CLEAR, completed::set);
+        service.executeAsync(plugin, WeaponChestService.ActionType.CLEAR, progress::add, completed::set);
         var runnable = org.mockito.ArgumentCaptor.forClass(Runnable.class);
         verify(scheduler).runTaskTimer(eq(plugin), runnable.capture(), eq(1L), eq(1L));
         for (int tick = 0; tick < 4 && completed.get() == null; tick++) runnable.getValue().run();
@@ -199,6 +201,8 @@ class WeaponChestServiceTest {
         assertNotNull(completed.get());
         assertTrue(completed.get().success());
         assertEquals(1, completed.get().affectedChests());
+        assertTrue(progress.stream().anyMatch(update -> update.stage().equals("Scanning chunks")));
+        assertTrue(progress.stream().anyMatch(update -> update.stage().equals("Emptying chests")));
         verify(inventory).clear();
         verify(task).cancel();
     }

@@ -9,6 +9,7 @@ import org.bukkit.event.inventory.ClickType;
 import org.bukkit.event.inventory.InventoryAction;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryDragEvent;
+import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.inventory.ItemStack;
 
 import java.util.Objects;
@@ -80,5 +81,10 @@ public final class WeaponLootGuiListener implements Listener {
             }
             manager.handleDrop(player, holder, slot, item);
         });
+    }
+
+    @EventHandler
+    public void onQuit(PlayerQuitEvent event) {
+        manager.closeProgress(event.getPlayer());
     }
 }
