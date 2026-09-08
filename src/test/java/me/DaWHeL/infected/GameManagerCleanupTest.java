@@ -2,6 +2,7 @@ package me.DaWHeL.infected;
 
 import me.DaWHeL.infected.Roles.Survivor;
 import org.bukkit.Location;
+import org.bukkit.Chunk;
 import org.bukkit.Server;
 import org.bukkit.World;
 import org.bukkit.configuration.file.YamlConfiguration;
@@ -20,6 +21,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
+import java.util.concurrent.CompletableFuture;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -53,7 +55,10 @@ class GameManagerCleanupTest {
         config.set("settings.teleport-batch-size", 2);
         config.set("settings.teleport-delay", 40);
         config.set("settings.infected-teleport-delay", 0);
-        Location location = new Location(mock(World.class), 0, 64, 0);
+        World world = mock(World.class);
+        when(world.getChunkAtAsync(anyInt(), anyInt(), org.mockito.ArgumentMatchers.eq(false)))
+                .thenReturn(CompletableFuture.completedFuture(mock(Chunk.class)));
+        Location location = new Location(world, 0, 64, 0);
         when(repository.loadedHoldingSpawn()).thenReturn(Optional.of(location));
         for (SpawnRole role : SpawnRole.values()) {
             when(repository.loadedLocations(role)).thenReturn(List.of(location));
@@ -66,10 +71,20 @@ class GameManagerCleanupTest {
         }).when(teleports).teleportPlayersBatch(
                 any(SpawnRole.class), anyList(), anyInt(), anyLong(), any(), any());
         doAnswer(invocation -> {
+            completions.put(invocation.getArgument(0), invocation.getArgument(6));
+            return mock(BukkitTask.class);
+        }).when(teleports).teleportPlayersBatch(
+                any(SpawnRole.class), anyList(), anyList(), anyInt(), anyLong(), any(), any());
+        doAnswer(invocation -> {
             completions.put(invocation.getArgument(0), invocation.getArgument(7));
             return mock(BukkitTask.class);
         }).when(teleports).teleportPlayersBatch(
                 any(SpawnRole.class), anyList(), anyInt(), anyLong(), any(), any(), any(), any());
+        doAnswer(invocation -> {
+            completions.put(invocation.getArgument(0), invocation.getArgument(8));
+            return mock(BukkitTask.class);
+        }).when(teleports).teleportPlayersBatch(
+                any(SpawnRole.class), anyList(), anyList(), anyInt(), anyLong(), any(), any(), any(), any());
         doAnswer(invocation -> {
             ((Runnable) invocation.getArgument(0)).run();
             return mock(BukkitTask.class);
@@ -105,8 +120,6 @@ class GameManagerCleanupTest {
         completions.get(SpawnRole.SURVIVOR).accept(success(2));
         completions.get(SpawnRole.INFECTED_RELEASE).accept(success(1));
         assertTrue(manager.queueLateJoin(queued));
-        manager.getSurvivors().add(survivor(first));
-        manager.getSurvivors().add(survivor(second));
         int rosterSizeBeforeStop = manager.getSurvivors().size() + manager.getInfected().size();
 
         assertTrue(manager.stopGame());

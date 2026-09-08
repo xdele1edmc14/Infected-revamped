@@ -26,4 +26,10 @@ class ScoreboardBarTest {
     void rejectsNonPositiveBarLengths() {
         assertEquals("", ScoreboardBar.build(3, 2, 0, "B", "R", "E"));
     }
+
+    @Test
+    void capsConfiguredBarLengthBeforeAllocatingOutput() {
+        assertEquals(64,
+                ScoreboardBar.build(3, 2, 1_000_000, "B", "R", "E").length());
+    }
 }

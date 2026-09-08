@@ -48,4 +48,19 @@ class WeaponLootCatalogTest {
                                 .generatedChestCount())
         );
     }
+
+    @Test
+    void lootStackRangesCannotExceedOneInventoryStack() {
+        ItemStack item = mock(ItemStack.class);
+        when(item.clone()).thenReturn(item);
+
+        assertAll(
+                () -> assertThrows(IllegalArgumentException.class,
+                        () -> new WeaponLootCatalog.GunEntry(
+                                UUID.randomUUID(), item, LootRarity.COMMON, item, 1, 65)),
+                () -> assertThrows(IllegalArgumentException.class,
+                        () -> new WeaponLootCatalog.GrenadeEntry(
+                                UUID.randomUUID(), item, LootRarity.COMMON, 1, 65))
+        );
+    }
 }

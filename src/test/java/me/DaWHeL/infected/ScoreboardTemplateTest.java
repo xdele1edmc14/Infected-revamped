@@ -65,4 +65,12 @@ class ScoreboardTemplateTest {
         assertEquals(List.of("{survivors}", "{infected}"),
                 new ScoreboardTemplate(legacyConfig).lines(ParticipantRole.INFECTED));
     }
+
+    @Test
+    void capsLifeHeartRenderingBeforeRepeatingConfiguredGlyphs() {
+        ScoreboardTemplate.State state = new ScoreboardTemplate.State(
+                ParticipantRole.INFECTED, 0, 0, 1_000_000, 1_000_000, 1, 1);
+
+        assertEquals(64, template.placeholders(state).get("lives_hearts").length());
+    }
 }

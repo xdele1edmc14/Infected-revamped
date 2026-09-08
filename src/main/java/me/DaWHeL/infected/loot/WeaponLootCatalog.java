@@ -14,6 +14,8 @@ public record WeaponLootCatalog(
         List<GrenadeEntry> grenades,
         List<String> errors
 ) {
+    public static final int MAX_STACK_RANGE = 64;
+
     public WeaponLootCatalog {
         settings = Objects.requireNonNull(settings, "settings");
         guns = guns.stream().map(GunEntry::copy).toList();
@@ -65,8 +67,9 @@ public record WeaponLootCatalog(
             gun = Objects.requireNonNull(gun, "gun").clone();
             Objects.requireNonNull(rarity, "rarity");
             ammo = ammo == null ? null : ammo.clone();
-            if (minAmmoBundles < 1 || maxAmmoBundles < minAmmoBundles) {
-                throw new IllegalArgumentException("Invalid ammo bundle range.");
+            if (minAmmoBundles < 1 || maxAmmoBundles < minAmmoBundles
+                    || maxAmmoBundles > MAX_STACK_RANGE) {
+                throw new IllegalArgumentException("Ammo bundle range must stay between 1 and 64.");
             }
         }
 
@@ -80,8 +83,8 @@ public record WeaponLootCatalog(
             Objects.requireNonNull(id, "id");
             item = Objects.requireNonNull(item, "item").clone();
             Objects.requireNonNull(rarity, "rarity");
-            if (minQuantity < 1 || maxQuantity < minQuantity) {
-                throw new IllegalArgumentException("Invalid grenade quantity range.");
+            if (minQuantity < 1 || maxQuantity < minQuantity || maxQuantity > MAX_STACK_RANGE) {
+                throw new IllegalArgumentException("Grenade quantity range must stay between 1 and 64.");
             }
         }
 

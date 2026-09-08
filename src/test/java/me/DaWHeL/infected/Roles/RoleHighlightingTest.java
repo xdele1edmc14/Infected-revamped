@@ -6,18 +6,19 @@ import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class RoleHighlightingTest {
 
     @Test
-    void survivorIsHighlightedAsTheInfectedTarget() {
+    void survivorRoleNeverEnablesEntityGlow() {
         Player player = playerThatStopsAfterHighlighting();
 
         assertThrows(StopAfterHighlighting.class, () -> new Survivor(player));
 
-        verify(player).setGlowing(true);
+        verify(player, never()).setGlowing(true);
     }
 
     @Test

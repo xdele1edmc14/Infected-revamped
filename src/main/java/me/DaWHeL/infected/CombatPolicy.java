@@ -19,7 +19,7 @@ public final class CombatPolicy {
                 || (attacker == ParticipantRole.INFECTED && victim == ParticipantRole.INFECTED)) {
             return Decision.cancel();
         }
-        if (attacker == ParticipantRole.INFECTED && phase != RoundPhase.ACTIVE) {
+        if (phase != RoundPhase.ACTIVE) {
             return Decision.cancel();
         }
         if (attacker == ParticipantRole.INFECTED && !directPlayerMelee) {

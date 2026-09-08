@@ -42,7 +42,7 @@ public final class ScoreboardTemplate {
     }
 
     private String lives(int remaining, int maximum) {
-        int safeMaximum = Math.max(0, maximum);
+        int safeMaximum = Math.min(InfectedLifeTracker.MAX_LIVES, Math.max(0, maximum));
         int safeRemaining = Math.max(0, Math.min(remaining, safeMaximum));
         String full = config.getString("scoreboard.lives.full", "<red>♥");
         String empty = config.getString("scoreboard.lives.empty", "<dark_gray>♡");

@@ -144,6 +144,37 @@ class WeaponLootRepositoryTest {
         assertTrue(repository.snapshot().errors().stream().anyMatch(error -> error.contains("settings")));
     }
 
+    @Test
+    void rejectsPersistedLootRangesAboveTheGuiLimit() throws Exception {
+        String gunId = "00000000-0000-0000-0000-000000000011";
+        String grenadeId = "00000000-0000-0000-0000-000000000012";
+        Files.writeString(directory.resolve("weapon-loot.yml"), """
+                guns:
+                  %s:
+                    item: item-bytes
+                    rarity: COMMON
+                    min-ammo-bundles: 1
+                    max-ammo-bundles: 1000000
+                grenades:
+                  %s:
+                    item: item-bytes
+                    rarity: COMMON
+                    min-quantity: 1
+                    max-quantity: 1000000
+                """.formatted(gunId, grenadeId));
+        ItemSnapshotCodec codec = mock(ItemSnapshotCodec.class);
+        ItemStack decoded = item("item-bytes");
+        when(codec.decode("item-bytes")).thenReturn(decoded);
+
+        WeaponLootCatalog snapshot = new WeaponLootRepository(directory.toFile(), codec).snapshot();
+
+        assertAll(
+                () -> assertTrue(snapshot.guns().isEmpty()),
+                () -> assertTrue(snapshot.grenades().isEmpty()),
+                () -> assertEquals(2, snapshot.errors().size())
+        );
+    }
+
     private static ItemStack item(String payload) {
         ItemStack item = mock(ItemStack.class, payload);
         when(item.clone()).thenReturn(item);

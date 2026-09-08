@@ -2,6 +2,7 @@ package me.DaWHeL.infected.Handlers;
 
 import me.DaWHeL.infected.GameManager;
 import me.DaWHeL.infected.DamageAttackerResolver;
+import me.DaWHeL.infected.ParticipantRole;
 import me.DaWHeL.infected.localization.DeathTitleMessages;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
@@ -33,8 +34,7 @@ public class InfectedDeathListener implements Listener {
         var player = event.getEntity();
 
         // Check if the player is infected
-        boolean isInfected = gameManager.getInfected().stream()
-                .anyMatch(i -> i.getPlayer().equals(player));
+        boolean isInfected = gameManager.roleOf(player) == ParticipantRole.INFECTED;
 
         if (!isInfected) return;
 

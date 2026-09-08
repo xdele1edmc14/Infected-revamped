@@ -7,12 +7,13 @@ import java.util.Set;
 import java.util.UUID;
 
 public final class InfectedLifeTracker {
+    public static final int MAX_LIVES = 64;
     private final Map<UUID, Integer> remainingLives = new HashMap<>();
     private final Set<UUID> eliminatedPlayers = new HashSet<>();
 
     public void register(UUID playerId, int lives) {
-        if (lives < 1) {
-            throw new IllegalArgumentException("Infected lives must be at least 1");
+        if (lives < 1 || lives > MAX_LIVES) {
+            throw new IllegalArgumentException("Infected lives must be between 1 and " + MAX_LIVES);
         }
 
         remainingLives.put(playerId, lives);

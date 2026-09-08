@@ -1,6 +1,7 @@
 package me.DaWHeL.infected.Handlers;
 
 import me.DaWHeL.infected.GameManager;
+import me.DaWHeL.infected.ParticipantRole;
 import org.bukkit.ChatColor;
 import org.bukkit.Material;
 import org.bukkit.block.Block;
@@ -23,8 +24,7 @@ public class InfectedInventoryLockListener implements Listener {
     }
 
     private boolean isInfected(Player player) {
-        return gameManager.getInfected().stream()
-                .anyMatch(inf -> inf.getPlayer().equals(player));
+        return gameManager.roleOf(player) == ParticipantRole.INFECTED;
     }
 
     // Prevent any inventory modification
@@ -32,7 +32,6 @@ public class InfectedInventoryLockListener implements Listener {
     public void onInventoryClick(InventoryClickEvent event) {
         if (event.getWhoClicked() instanceof Player player && isInfected(player)) {
             event.setCancelled(true);
-            player.updateInventory();
         }
     }
 
@@ -40,7 +39,6 @@ public class InfectedInventoryLockListener implements Listener {
     public void onInventoryDrag(InventoryDragEvent event) {
         if (event.getWhoClicked() instanceof Player player && isInfected(player)) {
             event.setCancelled(true);
-            player.updateInventory();
         }
     }
 

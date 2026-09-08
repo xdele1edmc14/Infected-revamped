@@ -51,8 +51,8 @@ public final class AdminSetupService {
                 infected,
                 config().getInt("settings.starting-zombies", 5),
                 config().getInt("settings.infected-teleport-delay", 10),
-                config().getInt("settings.teleport-batch-size", 5),
-                config().getInt("settings.teleport-delay", 20)
+                config().getInt("settings.teleport-batch-size", 10),
+                config().getInt("settings.teleport-delay", 5)
         );
     }
 

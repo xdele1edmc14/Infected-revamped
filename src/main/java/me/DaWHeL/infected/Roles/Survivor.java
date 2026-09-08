@@ -12,7 +12,7 @@ public class Survivor {
     }
 
     private void setup() {
-        player.setGlowing(true);
+        player.setGlowing(false);
         player.getInventory().setHelmet(null);
         player.setPlayerListName(ChatColor.GREEN + player.getName());
         player.sendMessage(ChatColor.GREEN + "You are a survivor! Avoid the zombies!");

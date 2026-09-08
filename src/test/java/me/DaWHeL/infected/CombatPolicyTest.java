@@ -47,6 +47,40 @@ class CombatPolicyTest {
     }
 
     @Test
+    void blocksSurvivorAttacksAgainstInfectedBeforeActivePlay() {
+        for (RoundPhase phase : new RoundPhase[]{
+                RoundPhase.LOBBY, RoundPhase.COUNTDOWN, RoundPhase.HEADSTART, RoundPhase.ENDING}) {
+            assertEquals(new Decision(true, false), policy.decide(
+                    phase,
+                    ParticipantRole.SURVIVOR,
+                    ParticipantRole.INFECTED,
+                    true,
+                    false));
+        }
+    }
+
+    @Test
+    void blocksResolvedPlayerCombatBeforeActiveEvenWhileRoleStateIsBeingRebuilt() {
+        for (RoundPhase phase : new RoundPhase[]{
+                RoundPhase.LOBBY, RoundPhase.COUNTDOWN, RoundPhase.HEADSTART, RoundPhase.ENDING}) {
+            assertAll(
+                    () -> assertEquals(new Decision(true, false), policy.decide(
+                            phase,
+                            ParticipantRole.NONE,
+                            ParticipantRole.SURVIVOR,
+                            true,
+                            false)),
+                    () -> assertEquals(new Decision(true, false), policy.decide(
+                            phase,
+                            ParticipantRole.INFECTED,
+                            ParticipantRole.NONE,
+                            true,
+                            false))
+            );
+        }
+    }
+
+    @Test
     void keepsInfectedCombatDirectMeleeOnly() {
         assertAll(
                 () -> assertEquals(new Decision(true, false), policy.decide(

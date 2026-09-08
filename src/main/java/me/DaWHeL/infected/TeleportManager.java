@@ -1,8 +1,6 @@
 package me.DaWHeL.infected;
 
 import org.bukkit.Location;
-import org.bukkit.Material;
-import org.bukkit.World;
 import org.bukkit.entity.Player;
 import org.bukkit.scheduler.BukkitTask;
 
@@ -16,7 +14,6 @@ import java.util.function.BiConsumer;
 import java.util.function.Predicate;
 
 public class TeleportManager {
-    private final InfectedPlugin plugin;
     private final SpawnRepository spawnRepository;
     private final PluginTaskScheduler scheduler;
 
@@ -33,54 +30,30 @@ public class TeleportManager {
             SpawnRepository spawnRepository,
             PluginTaskScheduler scheduler
     ) {
-        this.plugin = Objects.requireNonNull(plugin, "plugin");
+        Objects.requireNonNull(plugin, "plugin");
         this.spawnRepository = Objects.requireNonNull(spawnRepository, "spawnRepository");
         this.scheduler = Objects.requireNonNull(scheduler, "scheduler");
     }
 
-    public void addTeleportPoint(Player player, String name) {
-        Location location = player.getLocation();
-        World world = location.getWorld();
-        if (world == null) {
-            player.sendMessage("Teleport point could not be saved because its world is unavailable.");
-            return;
+    public boolean addTeleportPoint(Player player, String name) {
+        Objects.requireNonNull(player, "player");
+        if (!isValidPointName(name)) {
+            player.sendMessage("Teleport point names cannot be blank or contain periods.");
+            return false;
         }
-
-        int half = 2;
-        for (int x = -half; x <= half; x++) {
-            for (int z = -half; z <= half; z++) {
-                Material blockType = (x == 0 && z == 0) ? Material.IRON_BLOCK : Material.GOLD_BLOCK;
-                world.getBlockAt(location.getBlockX() + x, location.getBlockY(), location.getBlockZ() + z)
-                        .setType(blockType);
-            }
+        Location location = player.getLocation();
+        if (location.getWorld() == null) {
+            player.sendMessage("Teleport point could not be saved because its world is unavailable.");
+            return false;
         }
 
         spawnRepository.savePoint(SpawnRole.SURVIVOR, name, location);
         player.sendMessage("Survivor spawn " + name + " added!");
+        return true;
     }
 
-    public void removeTeleportPoint(String name) {
-        SpawnRepository.NamedSpawn stored = spawnRepository.points(SpawnRole.SURVIVOR).stream()
-                .filter(point -> point.name().equals(name))
-                .findFirst()
-                .orElse(null);
-        if (stored == null) {
-            return;
-        }
-
-        World world = plugin.getServer().getWorld(stored.location().world());
-        if (world != null) {
-            int centerX = (int) Math.floor(stored.location().x());
-            int centerY = (int) Math.floor(stored.location().y());
-            int centerZ = (int) Math.floor(stored.location().z());
-            int half = 2;
-            for (int dx = -half; dx <= half; dx++) {
-                for (int dz = -half; dz <= half; dz++) {
-                    world.getBlockAt(centerX + dx, centerY, centerZ + dz).setType(Material.AIR);
-                }
-            }
-        }
-        spawnRepository.deletePoint(SpawnRole.SURVIVOR, name);
+    public boolean removeTeleportPoint(String name) {
+        return isValidPointName(name) && spawnRepository.deletePoint(SpawnRole.SURVIVOR, name);
     }
 
     public List<Location> getTeleportPoints() {
@@ -108,6 +81,25 @@ public class TeleportManager {
             Consumer<TeleportBatchResult> completion
     ) {
         return teleportPlayersBatch(role, players, batchSize, delayTicks, player -> true, completion);
+    }
+
+    public BukkitTask teleportPlayersBatch(
+            SpawnRole role,
+            List<Location> platforms,
+            List<Player> players,
+            int batchSize,
+            long delayTicks,
+            Predicate<Player> eligibility,
+            Consumer<TeleportBatchResult> completion
+    ) {
+        return teleportPlayersBatch(
+                role, platforms, players, batchSize, delayTicks, eligibility,
+                player -> {
+                },
+                (player, teleported) -> {
+                },
+                completion
+        );
     }
 
     public BukkitTask teleportPlayersBatch(
@@ -142,7 +134,32 @@ public class TeleportManager {
             BiConsumer<Player, Boolean> afterTeleport,
             Consumer<TeleportBatchResult> completion
     ) {
+        return teleportPlayersBatch(
+                role,
+                spawnRepository.loadedLocations(role),
+                players,
+                batchSize,
+                delayTicks,
+                eligibility,
+                beforeTeleport,
+                afterTeleport,
+                completion
+        );
+    }
+
+    public BukkitTask teleportPlayersBatch(
+            SpawnRole role,
+            List<Location> platforms,
+            List<Player> players,
+            int batchSize,
+            long delayTicks,
+            Predicate<Player> eligibility,
+            Consumer<Player> beforeTeleport,
+            BiConsumer<Player, Boolean> afterTeleport,
+            Consumer<TeleportBatchResult> completion
+    ) {
         Objects.requireNonNull(role, "role");
+        Objects.requireNonNull(platforms, "platforms");
         Objects.requireNonNull(players, "players");
         Objects.requireNonNull(eligibility, "eligibility");
         Objects.requireNonNull(beforeTeleport, "beforeTeleport");
@@ -152,7 +169,6 @@ public class TeleportManager {
             throw new IllegalArgumentException("Teleport batch size must be at least 1.");
         }
 
-        List<Location> platforms = spawnRepository.loadedLocations(role);
         if (platforms.isEmpty()) {
             completion.accept(new TeleportBatchResult(
                     0,
@@ -187,7 +203,7 @@ public class TeleportManager {
 
                 attempted[0]++;
                 Location platform = platforms.get(distributionIndex % platforms.size());
-                Location destination = getNextSlot(platform, distributionIndex / platforms.size());
+                Location destination = slotDestination(platform, distributionIndex / platforms.size());
                 beforeTeleport.accept(player);
                 boolean teleported = false;
                 try {
@@ -216,19 +232,17 @@ public class TeleportManager {
         return task;
     }
 
-    private Location getNextSlot(Location center, int slotIndex) {
+    static Location slotDestination(Location center, int slotIndex) {
         int half = 2;
         int row = slotIndex / 5;
         int column = slotIndex % 5;
-        double x = center.getX() - half + column;
-        double z = center.getZ() - half + row;
-        return new Location(
-                center.getWorld(),
-                x + 0.5,
-                center.getY(),
-                z + 0.5,
-                center.getYaw(),
-                center.getPitch()
-        );
+        Location destination = center.clone();
+        destination.setX(center.getX() - half + column + 0.5);
+        destination.setZ(center.getZ() - half + row + 0.5);
+        return destination;
+    }
+
+    private static boolean isValidPointName(String name) {
+        return name != null && !name.isBlank() && !name.contains(".");
     }
 }

@@ -25,7 +25,6 @@ import java.util.Random;
 public final class InfectedRespawnListener implements Listener {
     private static final long RESPAWN_COOLDOWN_TICKS = 60L;
     private final GameManager gameManager;
-    private final SpawnRepository spawnRepository;
     private final Random random;
     private final RespawnPotionEffects potionEffects;
 
@@ -40,7 +39,7 @@ public final class InfectedRespawnListener implements Listener {
     InfectedRespawnListener(GameManager gameManager, SpawnRepository spawnRepository, Random random,
                             RespawnPotionEffects potionEffects) {
         this.gameManager = Objects.requireNonNull(gameManager, "gameManager");
-        this.spawnRepository = Objects.requireNonNull(spawnRepository, "spawnRepository");
+        Objects.requireNonNull(spawnRepository, "spawnRepository");
         this.random = Objects.requireNonNull(random, "random");
         this.potionEffects = Objects.requireNonNull(potionEffects, "potionEffects");
     }
@@ -66,13 +65,25 @@ public final class InfectedRespawnListener implements Listener {
         if (phase != RoundPhase.ACTIVE) {
             return;
         }
-        if (gameManager.roleOf(player) != ParticipantRole.INFECTED) {
+        ParticipantRole role = gameManager.roleOf(player);
+        if (role == ParticipantRole.SURVIVOR) {
+            java.util.List<Location> survivorSpawns = gameManager.roundSpawnLocations(SpawnRole.SURVIVOR);
+            if (survivorSpawns.isEmpty()) {
+                player.sendMessage(ChatColor.RED
+                        + "No survivor respawn is available. The round is being cancelled.");
+                gameManager.cancelForUnsafeInfectedRespawn();
+                return;
+            }
+            event.setRespawnLocation(survivorSpawns.get(random.nextInt(survivorSpawns.size())));
+            return;
+        }
+        if (role != ParticipantRole.INFECTED) {
             return;
         }
 
-        Optional<Location> holdingSpawn = spawnRepository.loadedHoldingSpawn();
+        Optional<Location> holdingSpawn = gameManager.roundHoldingSpawn();
         Optional<Location> configured = InfectedRespawnSelector.select(
-                spawnRepository.loadedLocations(SpawnRole.INFECTED_RESPAWN), random);
+                gameManager.roundSpawnLocations(SpawnRole.INFECTED_RESPAWN), random);
         if (holdingSpawn.isEmpty() || configured.isEmpty()) {
             player.sendMessage(ChatColor.RED
                     + "No safe infected cage or respawn is available. The round is being cancelled.");
@@ -81,17 +92,18 @@ public final class InfectedRespawnListener implements Listener {
         }
 
         event.setRespawnLocation(holdingSpawn.get());
+        gameManager.containInfectedForRespawn(player);
         potionEffects.applyBlindness(player, (int) RESPAWN_COOLDOWN_TICKS);
 
         long roundId = gameManager.currentRoundId();
         gameManager.getPlugin().getServer().getScheduler().runTaskLater(
                 gameManager.getPlugin(),
-                () -> releaseIfStillActive(player, roundId, configured.get()),
+                () -> releaseIfStillActive(player, roundId),
                 RESPAWN_COOLDOWN_TICKS
         );
     }
 
-    private void releaseIfStillActive(Player player, long roundId, Location respawn) {
+    private void releaseIfStillActive(Player player, long roundId) {
         if (!player.isOnline()) {
             return;
         }
@@ -101,7 +113,15 @@ public final class InfectedRespawnListener implements Listener {
                 || gameManager.roleOf(player) != ParticipantRole.INFECTED) {
             return;
         }
-        if (!gameManager.teleportInfectedToRespawn(player, respawn)) {
+        Optional<Location> respawn = InfectedRespawnSelector.select(
+                gameManager.roundSpawnLocations(SpawnRole.INFECTED_RESPAWN), random);
+        if (respawn.isEmpty()) {
+            player.sendMessage(ChatColor.RED
+                    + "No safe infected respawn is available. The round is being cancelled.");
+            gameManager.cancelForUnsafeInfectedRespawn();
+            return;
+        }
+        if (!gameManager.teleportInfectedToRespawn(player, respawn.get())) {
             player.sendMessage(ChatColor.RED
                     + "Your infected respawn was cancelled. The round is being cancelled.");
             gameManager.cancelForUnsafeInfectedRespawn();

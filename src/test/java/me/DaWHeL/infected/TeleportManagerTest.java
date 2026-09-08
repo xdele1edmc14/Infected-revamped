@@ -2,6 +2,7 @@ package me.DaWHeL.infected;
 
 import org.bukkit.Location;
 import org.bukkit.World;
+import org.bukkit.block.Block;
 import org.bukkit.entity.Player;
 import org.bukkit.scheduler.BukkitTask;
 import org.junit.jupiter.api.BeforeEach;
@@ -20,6 +21,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -57,6 +59,31 @@ class TeleportManagerTest {
                 () -> assertEquals("No infected release spawns are available.", completion.get().error())
         );
         verify(scheduler, never()).runRepeating(org.mockito.ArgumentMatchers.any(), anyLong(), anyLong());
+    }
+
+    @Test
+    void savingALegacyTeleportPointNeverEditsArenaBlocks() {
+        Player player = mock(Player.class);
+        World world = mock(World.class);
+        when(world.getBlockAt(anyInt(), anyInt(), anyInt())).thenReturn(mock(Block.class));
+        Location location = new Location(world, 12.5, 70, -8.5);
+        when(player.getLocation()).thenReturn(location);
+
+        manager.addTeleportPoint(player, "arena");
+
+        verify(spawnRepository).savePoint(SpawnRole.SURVIVOR, "arena", location);
+        verify(world, never()).getBlockAt(anyInt(), anyInt(), anyInt());
+    }
+
+    @Test
+    void removingALegacyTeleportPointReportsWhetherItExisted() {
+        when(spawnRepository.deletePoint(SpawnRole.SURVIVOR, "missing"))
+                .thenReturn(false);
+        when(spawnRepository.deletePoint(SpawnRole.SURVIVOR, "arena"))
+                .thenReturn(true);
+
+        assertFalse(manager.removeTeleportPoint("missing"));
+        assertTrue(manager.removeTeleportPoint("arena"));
     }
 
     @Test

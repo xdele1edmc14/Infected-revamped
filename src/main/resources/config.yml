@@ -5,8 +5,8 @@ settings:
   infected-lives: 3              # Deaths an infected player can take before becoming a spectator
   infected-teleport-delay: 10    # Seconds after all the survivals finished teleporting, to start teleporting the infected players
 
-  teleport-batch-size: 5         # Players teleported per teleport-delay to avoid lag
-  teleport-delay: 40             # Delay in TICKS between each teleport batch (20 ticks = 1 second)
+  teleport-batch-size: 10        # Players teleported per teleport-delay to avoid lag
+  teleport-delay: 5              # Delay in TICKS between each teleport batch (20 ticks = 1 second)
 
 # Scoreboard configuration
 scoreboard:

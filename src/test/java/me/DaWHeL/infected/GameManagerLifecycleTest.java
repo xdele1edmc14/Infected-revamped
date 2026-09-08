@@ -5,6 +5,7 @@ import org.bukkit.Location;
 import org.bukkit.GameMode;
 import org.bukkit.Server;
 import org.bukkit.World;
+import org.bukkit.Chunk;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.PlayerInventory;
@@ -23,6 +24,7 @@ import java.util.UUID;
 import java.util.ArrayList;
 import java.util.function.Consumer;
 import java.util.function.BiConsumer;
+import java.util.concurrent.CompletableFuture;
 
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
@@ -41,6 +43,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 class GameManagerLifecycleTest {
@@ -100,12 +103,25 @@ class GameManagerLifecycleTest {
         }).when(teleportManager).teleportPlayersBatch(
                 any(SpawnRole.class), anyList(), anyInt(), anyLong(), any(), any());
         doAnswer(invocation -> {
+            SpawnRole role = invocation.getArgument(0);
+            completions.put(role, invocation.getArgument(6));
+            return mock(BukkitTask.class);
+        }).when(teleportManager).teleportPlayersBatch(
+                any(SpawnRole.class), anyList(), anyList(), anyInt(), anyLong(), any(), any());
+        doAnswer(invocation -> {
             beforeReleaseTeleport = invocation.getArgument(5);
             afterReleaseTeleport = invocation.getArgument(6);
             completions.put(invocation.getArgument(0), invocation.getArgument(7));
             return mock(BukkitTask.class);
         }).when(teleportManager).teleportPlayersBatch(
                 any(SpawnRole.class), anyList(), anyInt(), anyLong(), any(), any(), any(), any());
+        doAnswer(invocation -> {
+            beforeReleaseTeleport = invocation.getArgument(6);
+            afterReleaseTeleport = invocation.getArgument(7);
+            completions.put(invocation.getArgument(0), invocation.getArgument(8));
+            return mock(BukkitTask.class);
+        }).when(teleportManager).teleportPlayersBatch(
+                any(SpawnRole.class), anyList(), anyList(), anyInt(), anyLong(), any(), any(), any(), any());
         doAnswer(invocation -> {
             delayedRelease[0] = invocation.getArgument(0);
             scheduledTasks.put(invocation.getArgument(1), invocation.getArgument(0));
@@ -147,6 +163,31 @@ class GameManagerLifecycleTest {
         assertFalse(result.success());
         assertTrue(result.message().contains("chest operation"));
         assertEquals(RoundPhase.LOBBY, gameManager.getPhase());
+    }
+
+    @Test
+    void twoHundredFiftyPlayerRoleLookupDoesNotRescanRegisteredRoleObjects() {
+        for (int index = 0; index < 249; index++) {
+            Player existing = player("indexed-existing-" + index);
+            gameManager.addSurvivor(mockSurvivor(existing));
+        }
+        Player player = player("indexed-role");
+        Survivor survivor = mock(Survivor.class);
+        when(survivor.getPlayer())
+                .thenReturn(player)
+                .thenThrow(new AssertionError("role lookup scanned the survivor roster"));
+        gameManager.addSurvivor(survivor);
+
+        assertEquals(ParticipantRole.SURVIVOR, gameManager.roleOf(player));
+    }
+
+    @Test
+    void clampsConfiguredInfectedLivesToTheSupportedRange() {
+        config.set("settings.infected-lives", Integer.MAX_VALUE);
+        assertEquals(InfectedLifeTracker.MAX_LIVES, gameManager.configuredInfectedLives());
+
+        config.set("settings.infected-lives", Integer.MIN_VALUE);
+        assertEquals(1, gameManager.configuredInfectedLives());
     }
 
     @Test
@@ -235,6 +276,52 @@ class GameManagerLifecycleTest {
                 () -> assertTrue(gameManager.getInfected().stream()
                         .noneMatch(infected -> gameManager.isContainedInfected(infected.getPlayer())))
         );
+    }
+
+    @Test
+    void waitsForOneDeduplicatedSpawnChunkPreloadBeforeDeploymentAndReleasesItsTicket() {
+        Location spawn = configureValidSetup(3, 1);
+        spawn.setX(8.5);
+        spawn.setZ(8.5);
+        World world = spawn.getWorld();
+        CompletableFuture<Chunk> preload = new CompletableFuture<>();
+        Chunk chunk = mock(Chunk.class);
+        when(chunk.addPluginChunkTicket(plugin)).thenReturn(true);
+        when(world.getChunkAtAsync(0, 0, false)).thenReturn(preload);
+        addLobbyPlayer("preload-first");
+        addLobbyPlayer("preload-second");
+        addLobbyPlayer("preload-third");
+
+        assertTrue(gameManager.startGame().success());
+
+        assertEquals(RoundPhase.COUNTDOWN, gameManager.getPhase());
+        verify(world, times(1)).getChunkAtAsync(0, 0, false);
+        verifyNoInteractions(teleportManager);
+
+        preload.complete(chunk);
+
+        assertTrue(completions.containsKey(SpawnRole.SURVIVOR));
+        verify(chunk).addPluginChunkTicket(plugin);
+
+        assertTrue(gameManager.stopGame());
+        verify(chunk).removePluginChunkTicket(plugin);
+    }
+
+    @Test
+    void preloadsChunksReachedByDistributedTeleportSlots() {
+        Location spawn = configureValidSetup(10, 1);
+        spawn.setX(15.5);
+        spawn.setZ(15.5);
+        World world = spawn.getWorld();
+        when(world.getChunkAtAsync(anyInt(), anyInt(), org.mockito.ArgumentMatchers.eq(false)))
+                .thenReturn(CompletableFuture.completedFuture(mock(Chunk.class)));
+        for (int index = 0; index < 10; index++) {
+            addLobbyPlayer("distributed-" + index);
+        }
+
+        assertTrue(gameManager.startGame().success());
+
+        verify(world).getChunkAtAsync(1, 0, false);
     }
 
     @Test
@@ -581,6 +668,11 @@ class GameManagerLifecycleTest {
     void resetPlayerStateClearsInventoryHelmetAndRestoresTheNeutralPlayerListName() {
         Player player = player("neutral-list-name");
         PlayerInventory inventory = player.getInventory();
+        org.bukkit.scoreboard.ScoreboardManager scoreboards =
+                mock(org.bukkit.scoreboard.ScoreboardManager.class);
+        org.bukkit.scoreboard.Scoreboard mainScoreboard = mock(org.bukkit.scoreboard.Scoreboard.class);
+        when(server.getScoreboardManager()).thenReturn(scoreboards);
+        when(scoreboards.getMainScoreboard()).thenReturn(mainScoreboard);
         World world = mock(World.class);
         when(player.getWorld()).thenReturn(world);
         when(world.getSpawnLocation()).thenReturn(new Location(world, 0.5, 64, 0.5));
@@ -591,6 +683,7 @@ class GameManagerLifecycleTest {
         verify(player).setPlayerListName("neutral-list-name");
         verify(inventory).clear();
         verify(inventory).setHelmet(null);
+        verify(player).setScoreboard(mainScoreboard);
     }
 
     @Test
@@ -691,6 +784,41 @@ class GameManagerLifecycleTest {
     }
 
     @Test
+    void shutdownResetsOnlinePlayersBeforeDiscardingTheirRoles() {
+        Player player = addLobbyPlayer("shutdown-online");
+        org.mockito.Mockito.doReturn(List.of(player)).when(server).getOnlinePlayers();
+
+        gameManager.shutdown();
+
+        verify(gameManager).resetPlayerState(player);
+        assertEquals(ParticipantRole.NONE, gameManager.roleOf(player));
+    }
+
+    @Test
+    void constructionBootstrapsPlayersAlreadyOnlineDuringPluginEnable() {
+        Player player = player("already-online");
+        PlayerInventory inventory = mock(PlayerInventory.class);
+        when(player.getInventory()).thenReturn(inventory);
+        World world = mock(World.class);
+        when(player.getWorld()).thenReturn(world);
+        when(world.getSpawnLocation()).thenReturn(new Location(world, 0.5, 64, 0.5));
+        org.mockito.Mockito.doReturn(List.of(player)).when(server).getOnlinePlayers();
+
+        GameManager enabledManager = org.mockito.Mockito.spy(new GameManager(
+                plugin,
+                spawnRepository,
+                teleportManager,
+                scheduler,
+                new RoundStartValidator(),
+                new Random(1),
+                roleFactory
+        ));
+
+        assertEquals(ParticipantRole.SURVIVOR, enabledManager.roleOf(player));
+        verify(inventory).clear();
+    }
+
+    @Test
     void infectedRespawnTeleportTemporarilyBypassesCageContainment() {
         startActiveRound(2, 1);
         Player infected = gameManager.getInfected().getFirst().getPlayer();
@@ -724,7 +852,7 @@ class GameManagerLifecycleTest {
         return participants;
     }
 
-    private void configureValidSetup(int participants, int startingInfected) {
+    private Location configureValidSetup(int participants, int startingInfected) {
         config.set("settings.starting-zombies", startingInfected);
         config.set("settings.teleport-batch-size", 2);
         config.set("settings.teleport-delay", 40);
@@ -734,6 +862,7 @@ class GameManagerLifecycleTest {
         for (SpawnRole role : SpawnRole.values()) {
             when(spawnRepository.loadedLocations(role)).thenReturn(List.of(location));
         }
+        return location;
     }
 
     private Location safeLocation() {
@@ -751,6 +880,8 @@ class GameManagerLifecycleTest {
         when(world.getBlockAt(0, 63, 0)).thenReturn(ground);
         when(world.getBlockAt(0, 64, 0)).thenReturn(feet);
         when(world.getBlockAt(0, 65, 0)).thenReturn(head);
+        when(world.getChunkAtAsync(anyInt(), anyInt(), org.mockito.ArgumentMatchers.eq(false)))
+                .thenReturn(CompletableFuture.completedFuture(mock(Chunk.class)));
         when(ground.getType()).thenReturn(org.bukkit.Material.STONE);
         when(ground.isPassable()).thenReturn(false);
         when(ground.getBoundingBox()).thenReturn(
