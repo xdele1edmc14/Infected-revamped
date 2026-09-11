@@ -39,13 +39,19 @@ public final class ParticipantDamageListener implements Listener {
             return;
         }
 
+        ParticipantRole victimRole = gameManager.roleOf(victim);
+        if (gameManager.getPhase() != me.DaWHeL.infected.RoundPhase.ACTIVE
+                && victimRole != ParticipantRole.NONE) {
+            event.setCancelled(true);
+            return;
+        }
+
         Optional<Player> resolved = attackerResolver.resolve(event);
         if (resolved.isEmpty()) {
             return;
         }
         Player attacker = resolved.get();
         ParticipantRole attackerRole = gameManager.roleOf(attacker);
-        ParticipantRole victimRole = gameManager.roleOf(victim);
         boolean directPlayerMelee = isDirectPlayerMelee(event, attacker);
 
         CombatPolicy.Decision decision = combatPolicy.decide(

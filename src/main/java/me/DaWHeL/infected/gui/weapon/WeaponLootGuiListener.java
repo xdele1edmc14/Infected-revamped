@@ -13,7 +13,7 @@ import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.inventory.ItemStack;
 
 import java.util.Objects;
-import java.util.Map;
+import java.util.List;
 import java.util.Set;
 
 public final class WeaponLootGuiListener implements Listener {
@@ -64,14 +64,18 @@ public final class WeaponLootGuiListener implements Listener {
     public void onDrag(InventoryDragEvent event) {
         if (!(event.getView().getTopInventory().getHolder() instanceof WeaponMenuHolder holder)) return;
         int topSize = event.getView().getTopInventory().getSize();
-        Map.Entry<Integer, ItemStack> dropped = event.getNewItems().entrySet().stream()
-                .filter(entry -> entry.getKey() >= 0 && entry.getKey() < topSize)
-                .findFirst().orElse(null);
-        if (dropped == null) return;
+        List<Integer> topSlots = event.getNewItems().keySet().stream()
+                .filter(slot -> slot >= 0 && slot < topSize)
+                .toList();
+        if (topSlots.isEmpty()) return;
         event.setCancelled(true);
+        if (topSlots.size() != 1) return;
+        int slot = topSlots.getFirst();
+        if (!WeaponLootGuiManager.acceptsDrop(holder.type(), slot)) return;
         if (!(event.getWhoClicked() instanceof Player player)) return;
-        int slot = dropped.getKey();
-        ItemStack item = dropped.getValue().clone();
+        ItemStack original = event.getOldCursor();
+        if (original == null) return;
+        ItemStack item = original.clone();
         plugin.getServer().getScheduler().runTask(plugin, () -> {
             if (player.getOpenInventory().getTopInventory().getHolder() != holder) return;
             if (!player.hasPermission("infected.admin")) {

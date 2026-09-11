@@ -22,6 +22,7 @@ import org.junit.jupiter.api.Test;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -70,6 +71,7 @@ class InfectedRespawnListenerTest {
         Block feet = block(Material.AIR, true);
         Block head = block(Material.AIR, true);
         when(world.getWorldBorder()).thenReturn(border);
+        when(world.isChunkLoaded(1, 1)).thenReturn(true);
         when(border.isInside(org.mockito.ArgumentMatchers.any(Location.class))).thenReturn(true);
         when(world.getMinHeight()).thenReturn(-64);
         when(world.getMaxHeight()).thenReturn(320);
@@ -91,7 +93,7 @@ class InfectedRespawnListenerTest {
         verify(gameManager).containInfectedForRespawn(player);
         assertEquals(60, potionEffects.blindnessDurationTicks);
         ArgumentCaptor<Runnable> release = ArgumentCaptor.forClass(Runnable.class);
-        verify(scheduler).runTaskLater(eq(plugin), release.capture(), eq(60L));
+        verify(gameManager).scheduleRoundTask(release.capture(), eq(60L));
 
         release.getValue().run();
 
@@ -102,12 +104,30 @@ class InfectedRespawnListenerTest {
     }
 
     @Test
+    void pendingRoundCleanupOwnsTheRespawnDestinationAndFinishesAfterRespawn() {
+        World world = mock(World.class);
+        Location spawn = mock(Location.class);
+        when(gameManager.isCleanupRespawnPending(player)).thenReturn(true);
+        when(player.getWorld()).thenReturn(world);
+        when(world.getSpawnLocation()).thenReturn(spawn);
+        ArgumentCaptor<Runnable> finish = ArgumentCaptor.forClass(Runnable.class);
+
+        listener.onPlayerRespawn(event);
+
+        verify(event).setRespawnLocation(spawn);
+        verify(scheduler).runTask(eq(plugin), finish.capture());
+        finish.getValue().run();
+        verify(gameManager).completeCleanupRespawn(player);
+        verify(gameManager, never()).roundHoldingSpawn();
+    }
+
+    @Test
     void cancelsRoundWhenTheHoldingSpawnIsUnavailable() {
         when(gameManager.roundHoldingSpawn()).thenReturn(Optional.empty());
 
         listener.onPlayerRespawn(event);
 
-        verify(gameManager).cancelForUnsafeInfectedRespawn();
+        verify(gameManager).cancelForUnavailableInfectedRespawn();
         verify(event, never()).setRespawnLocation(any());
         verify(scheduler, never()).runTaskLater(any(), any(Runnable.class),
                 org.mockito.ArgumentMatchers.anyLong());
@@ -124,13 +144,13 @@ class InfectedRespawnListenerTest {
     }
 
     @Test
-    void cancelsRoundWhenNoSafeDedicatedRespawnPointIsAvailable() {
+    void cancelsRoundWhenNoDedicatedRespawnPointIsAvailable() {
         when(gameManager.roundHoldingSpawn()).thenReturn(Optional.of(mock(Location.class)));
         when(gameManager.roundSpawnLocations(SpawnRole.INFECTED_RESPAWN)).thenReturn(java.util.List.of());
 
         listener.onPlayerRespawn(event);
 
-        verify(gameManager).cancelForUnsafeInfectedRespawn();
+        verify(gameManager).cancelForUnavailableInfectedRespawn();
         verify(event, never()).setRespawnLocation(org.mockito.ArgumentMatchers.any());
     }
 
@@ -148,7 +168,7 @@ class InfectedRespawnListenerTest {
     }
 
     @Test
-    void revalidatesCachedInfectedRespawnImmediatelyBeforeRelease() {
+    void trustsTheCachedInfectedRespawnImmediatelyBeforeRelease() {
         World world = mock(World.class);
         WorldBorder border = mock(WorldBorder.class);
         Location holding = new Location(world, 5.5, 80, 5.5);
@@ -157,6 +177,7 @@ class InfectedRespawnListenerTest {
         Block feet = block(Material.AIR, true);
         Block head = block(Material.AIR, true);
         when(world.getWorldBorder()).thenReturn(border);
+        when(world.isChunkLoaded(1, 1)).thenReturn(true);
         when(border.isInside(any(Location.class))).thenReturn(true);
         when(world.getMinHeight()).thenReturn(-64);
         when(world.getMaxHeight()).thenReturn(320);
@@ -169,17 +190,51 @@ class InfectedRespawnListenerTest {
                 .thenReturn(java.util.List.of(respawn));
         when(gameManager.currentRoundId()).thenReturn(9L);
         when(player.isOnline()).thenReturn(true);
+        when(gameManager.teleportInfectedToRespawn(player, respawn)).thenReturn(true);
 
         listener.onPlayerRespawn(event);
         when(feet.getType()).thenReturn(Material.STONE);
         when(feet.isPassable()).thenReturn(false);
         ArgumentCaptor<Runnable> release = ArgumentCaptor.forClass(Runnable.class);
-        verify(scheduler).runTaskLater(eq(plugin), release.capture(), eq(60L));
+        verify(gameManager).scheduleRoundTask(release.capture(), eq(60L));
 
         release.getValue().run();
 
+        verify(gameManager).teleportInfectedToRespawn(player, respawn);
+        verify(gameManager, never()).cancelForUnavailableInfectedRespawn();
+    }
+
+    @Test
+    void staleReleaseCallbackDoesNotStripTheNewRoundsBlindness() {
+        World world = mock(World.class);
+        WorldBorder border = mock(WorldBorder.class);
+        Location holding = new Location(world, 5.5, 80, 5.5);
+        Location respawn = new Location(world, 20.5, 70, 30.5);
+        Block ground = block(Material.STONE, false);
+        Block feet = block(Material.AIR, true);
+        Block head = block(Material.AIR, true);
+        when(world.getWorldBorder()).thenReturn(border);
+        when(world.isChunkLoaded(1, 1)).thenReturn(true);
+        when(border.isInside(any(Location.class))).thenReturn(true);
+        when(world.getMinHeight()).thenReturn(-64);
+        when(world.getMaxHeight()).thenReturn(320);
+        when(world.getBlockAt(20, 69, 30)).thenReturn(ground);
+        when(world.getBlockAt(20, 70, 30)).thenReturn(feet);
+        when(world.getBlockAt(20, 71, 30)).thenReturn(head);
+        when(ground.getBoundingBox()).thenReturn(new BoundingBox(20, 69, 30, 21, 70, 31));
+        when(gameManager.roundHoldingSpawn()).thenReturn(Optional.of(holding));
+        when(gameManager.roundSpawnLocations(SpawnRole.INFECTED_RESPAWN))
+                .thenReturn(java.util.List.of(respawn));
+        when(gameManager.currentRoundId()).thenReturn(7L, 8L);
+        when(player.isOnline()).thenReturn(true);
+        ArgumentCaptor<Runnable> release = ArgumentCaptor.forClass(Runnable.class);
+
+        listener.onPlayerRespawn(event);
+        verify(gameManager).scheduleRoundTask(release.capture(), eq(60L));
+        release.getValue().run();
+
+        assertFalse(potionEffects.blindnessRemoved);
         verify(gameManager, never()).teleportInfectedToRespawn(any(), any());
-        verify(gameManager).cancelForUnsafeInfectedRespawn();
     }
 
     @Test

@@ -15,7 +15,7 @@ import static org.mockito.Mockito.*;
 
 class StreamedChestOperationTest {
     @Test
-    void loadsGeneratedChunksWithoutGeneratingAndReleasesTemporaryChunksAfterClearing() {
+    void savesTemporaryChunksAfterClearingTheirInventories() {
         Plugin plugin = mock(Plugin.class);
         World world = mock(World.class);
         Chunk chunk = mock(Chunk.class);
@@ -43,12 +43,13 @@ class StreamedChestOperationTest {
                 () -> assertTrue(operation.result().success()),
                 () -> assertEquals(1, operation.result().affectedChests())
         );
-        verify(world).getChunkAtAsync(0, 0, false);
+        verify(world, times(3)).getChunkAtAsync(0, 0, false);
         verify(world, never()).getChunkAt(0, 0, false);
         verify(inventory).clear();
-        verify(chunk).addPluginChunkTicket(plugin);
-        verify(chunk).removePluginChunkTicket(plugin);
-        verify(chunk).unload(false);
+        verify(chunk, never()).addPluginChunkTicket(plugin);
+        verify(chunk, never()).removePluginChunkTicket(plugin);
+        verify(chunk, atLeast(2)).unload(false);
+        verify(chunk).unload(true);
     }
 
     @Test
@@ -138,7 +139,7 @@ class StreamedChestOperationTest {
         assertFalse(operation.result().success());
         verify(world, never()).isChunkLoaded(1, 0);
         verify(inventory, never()).clear();
-        verify(firstChunk).removePluginChunkTicket(plugin);
+        verify(firstChunk, never()).removePluginChunkTicket(plugin);
         verify(firstChunk).unload(false);
     }
 
@@ -195,6 +196,62 @@ class StreamedChestOperationTest {
         verify(world, times(8)).getChunkAtAsync(anyInt(), anyInt(), eq(false));
         verify(world, never()).getChunkAt(anyInt(), anyInt(), eq(false));
         verifyNoInteractions(discovery);
+    }
+
+    @Test
+    void releasesEachTemporaryScanChunkBeforeMovingToTheNextChunk() {
+        Plugin plugin = mock(Plugin.class);
+        World world = mock(World.class);
+        Chunk firstChunk = mock(Chunk.class);
+        Chunk secondChunk = mock(Chunk.class);
+        ChestDiscoveryService discovery = mock(ChestDiscoveryService.class);
+        ChestRegion region = ChestRegion.between(
+                new BlockPoint("arena", 0, 0, 0), new BlockPoint("arena", 31, 255, 15));
+        when(world.isChunkLoaded(anyInt(), anyInt())).thenReturn(false);
+        when(world.isChunkGenerated(anyInt(), anyInt())).thenReturn(true);
+        when(world.getChunkAtAsync(0, 0, false)).thenReturn(CompletableFuture.completedFuture(firstChunk));
+        when(world.getChunkAtAsync(1, 0, false)).thenReturn(CompletableFuture.completedFuture(secondChunk));
+        when(discovery.discover(eq(region), any(Chunk.class))).thenReturn(List.of(
+                new DiscoveredChest("chest", mock(Inventory.class))));
+        StreamedChestOperation operation = new StreamedChestOperation(
+                plugin, world, region,
+                new WeaponLootCatalog(null, null,
+                        new WeaponLootCatalog.Settings(0, 0, 5_000), List.of(), List.of(), List.of()),
+                discovery, mock(ChestLootGenerator.class), WeaponChestService.ActionType.CLEAR, () -> true);
+
+        assertFalse(operation.step(1, 1));
+
+        verify(firstChunk).unload(false);
+        verify(firstChunk, never()).addPluginChunkTicket(plugin);
+        verify(world, never()).getChunkAtAsync(1, 0, false);
+    }
+
+    @Test
+    void revalidatesChestEligibilityImmediatelyBeforeMutation() {
+        Plugin plugin = mock(Plugin.class);
+        World world = mock(World.class);
+        Chunk chunk = mock(Chunk.class);
+        Inventory inventory = mock(Inventory.class);
+        ChestDiscoveryService discovery = mock(ChestDiscoveryService.class);
+        ChestRegion region = ChestRegion.between(
+                new BlockPoint("arena", 0, 0, 0), new BlockPoint("arena", 15, 255, 15));
+        when(world.isChunkLoaded(0, 0)).thenReturn(true);
+        when(world.getChunkAt(0, 0)).thenReturn(chunk);
+        when(discovery.discover(region, chunk)).thenReturn(
+                List.of(new DiscoveredChest("chest", inventory)),
+                List.of(new DiscoveredChest("chest", inventory)),
+                List.of());
+        StreamedChestOperation operation = new StreamedChestOperation(
+                plugin, world, region,
+                new WeaponLootCatalog(null, null,
+                        new WeaponLootCatalog.Settings(0, 0, 5_000), List.of(), List.of(), List.of()),
+                discovery, mock(ChestLootGenerator.class), WeaponChestService.ActionType.CLEAR, () -> true);
+
+        while (!operation.step(1, 1)) { }
+
+        assertFalse(operation.result().success());
+        assertTrue(operation.result().errors().stream().anyMatch(error -> error.contains("changed")));
+        verify(inventory, never()).clear();
     }
 
     @Test
@@ -256,7 +313,46 @@ class StreamedChestOperationTest {
     }
 
     @Test
-    void cleanupContinuesAcrossChunksAndReportsATicketReleaseFailure() {
+    void cancellationRollsBackEveryInventoryAlreadyMutatedAndReleasesItsChunk() {
+        Plugin plugin = mock(Plugin.class);
+        World world = mock(World.class);
+        Chunk chunk = mock(Chunk.class);
+        Inventory first = mock(Inventory.class);
+        Inventory second = mock(Inventory.class);
+        org.bukkit.inventory.ItemStack original = mock(org.bukkit.inventory.ItemStack.class);
+        when(original.clone()).thenReturn(original);
+        when(first.getContents()).thenReturn(new org.bukkit.inventory.ItemStack[]{original});
+        ChestDiscoveryService discovery = mock(ChestDiscoveryService.class);
+        ChestRegion region = ChestRegion.between(
+                new BlockPoint("arena", 0, 0, 0), new BlockPoint("arena", 15, 255, 15));
+        when(world.isChunkLoaded(0, 0)).thenReturn(false);
+        when(world.isChunkGenerated(0, 0)).thenReturn(true);
+        when(world.getChunkAtAsync(0, 0, false)).thenReturn(CompletableFuture.completedFuture(chunk));
+        when(world.getChunkAt(0, 0)).thenReturn(chunk);
+        when(discovery.discover(region, chunk)).thenReturn(List.of(
+                new DiscoveredChest("first", first), new DiscoveredChest("second", second)));
+        when(chunk.addPluginChunkTicket(plugin)).thenReturn(true);
+        StreamedChestOperation operation = new StreamedChestOperation(
+                plugin, world, region,
+                new WeaponLootCatalog(null, null,
+                        new WeaponLootCatalog.Settings(0, 0, 5_000), List.of(), List.of(), List.of()),
+                discovery, mock(ChestLootGenerator.class), WeaponChestService.ActionType.CLEAR, () -> true);
+
+        assertFalse(operation.step(1, 1));
+        assertFalse(operation.step(1, 1));
+        assertFalse(operation.step(1, 1));
+        operation.cancel("Plugin disabled.");
+
+        assertFalse(operation.result().success());
+        verify(first).clear();
+        verify(first).setContents(new org.bukkit.inventory.ItemStack[]{original});
+        verify(second, never()).clear();
+        verify(chunk, never()).removePluginChunkTicket(plugin);
+        verify(chunk, atLeast(2)).unload(true);
+    }
+
+    @Test
+    void cleanupContinuesAcrossChunksWithoutRetainingPluginTickets() {
         Plugin plugin = mock(Plugin.class);
         World world = mock(World.class);
         Chunk firstChunk = mock(Chunk.class);
@@ -274,9 +370,6 @@ class StreamedChestOperationTest {
                 List.of(new DiscoveredChest("first", firstInventory)));
         when(discovery.discover(region, secondChunk)).thenReturn(
                 List.of(new DiscoveredChest("second", secondInventory)));
-        when(firstChunk.addPluginChunkTicket(plugin)).thenReturn(true);
-        when(secondChunk.addPluginChunkTicket(plugin)).thenReturn(true);
-        when(firstChunk.removePluginChunkTicket(plugin)).thenThrow(new IllegalStateException("ticket failed"));
         StreamedChestOperation operation = new StreamedChestOperation(
                 plugin, world, region,
                 new WeaponLootCatalog(null, null,
@@ -285,10 +378,10 @@ class StreamedChestOperationTest {
 
         while (!operation.step(2, 2)) { }
 
-        assertFalse(operation.result().success());
+        assertTrue(operation.result().success());
         assertEquals(2, operation.result().affectedChests());
-        assertTrue(operation.result().errors().stream().anyMatch(error -> error.contains("ticket failed")));
-        verify(secondChunk).removePluginChunkTicket(plugin);
+        verify(firstChunk, never()).addPluginChunkTicket(plugin);
+        verify(secondChunk, never()).addPluginChunkTicket(plugin);
     }
 
     @Test

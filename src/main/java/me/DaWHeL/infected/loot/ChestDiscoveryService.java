@@ -19,6 +19,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.LinkedHashSet;
 import java.util.function.Function;
 import java.util.function.Predicate;
 
@@ -71,7 +72,7 @@ public class ChestDiscoveryService {
             if (!eligibility.test(chest)) continue;
             Inventory inventory = inventoryInsideRegion(region, chest);
             String key = canonicalKey(chest, inventory);
-            found.putIfAbsent(key, new DiscoveredChest(key, inventory));
+            found.putIfAbsent(key, new DiscoveredChest(key, inventory, inventoryChunks(chest, inventory)));
         }
         List<DiscoveredChest> result = new ArrayList<>(found.values());
         result.sort(Comparator.comparing(DiscoveredChest::key));
@@ -113,6 +114,32 @@ public class ChestDiscoveryService {
             return left.compareTo(right) <= 0 ? left + "|" + right : right + "|" + left;
         }
         return locationKey(chest.getLocation());
+    }
+
+    private static Set<ChestRegion.ChunkKey> inventoryChunks(Chest chest, Inventory inventory) {
+        Set<ChestRegion.ChunkKey> chunks = new LinkedHashSet<>();
+        InventoryHolder holder = inventory.getHolder();
+        if (holder instanceof DoubleChest doubleChest) {
+            addHolderChunk(chunks, doubleChest.getLeftSide());
+            addHolderChunk(chunks, doubleChest.getRightSide());
+        }
+        if (chunks.isEmpty()) addLocationChunk(chunks, chest.getLocation());
+        return Set.copyOf(chunks);
+    }
+
+    private static void addHolderChunk(Set<ChestRegion.ChunkKey> chunks, InventoryHolder holder) {
+        if (holder instanceof BlockState state) {
+            addLocationChunk(chunks, state.getLocation());
+        } else if (holder instanceof DoubleChest chest) {
+            addLocationChunk(chunks, chest.getLocation());
+        }
+    }
+
+    private static void addLocationChunk(Set<ChestRegion.ChunkKey> chunks, Location location) {
+        if (location != null) {
+            chunks.add(new ChestRegion.ChunkKey(
+                    Math.floorDiv(location.getBlockX(), 16), Math.floorDiv(location.getBlockZ(), 16)));
+        }
     }
 
     private static String holderKey(InventoryHolder holder) {

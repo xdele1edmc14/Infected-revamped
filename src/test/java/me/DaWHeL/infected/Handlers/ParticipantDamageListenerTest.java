@@ -58,6 +58,18 @@ class ParticipantDamageListenerTest {
     }
 
     @Test
+    void cancelsEnvironmentalDamageToParticipantsBeforeActivePlay() {
+        EntityDamageEvent event = mock(EntityDamageEvent.class);
+        when(event.getEntity()).thenReturn(victim);
+        when(gameManager.getPhase()).thenReturn(RoundPhase.HEADSTART);
+        when(gameManager.roleOf(victim)).thenReturn(ParticipantRole.SURVIVOR);
+
+        listener.onParticipantDamage(event);
+
+        verify(event).setCancelled(true);
+    }
+
+    @Test
     void cancelsInfectedProjectilesDuringActivePlay() {
         Projectile projectile = mock(Projectile.class);
         EntityDamageByEntityEvent event = event(projectile, EntityDamageEvent.DamageCause.PROJECTILE, false);

@@ -32,6 +32,7 @@ public final class WeaponLootRepository {
     private final Set<UUID> removedGrenadeIds = new HashSet<>();
     private YamlConfiguration backing = new YamlConfiguration();
     private boolean loadBlocked;
+    private long revision;
 
     public WeaponLootRepository(File dataFolder, ItemSnapshotCodec codec) {
         Objects.requireNonNull(dataFolder, "dataFolder");
@@ -44,7 +45,12 @@ public final class WeaponLootRepository {
         return new WeaponLootCatalog(point1, point2, settings, guns, grenades, errors);
     }
 
+    public synchronized long revision() {
+        return revision;
+    }
+
     public synchronized List<String> reload() {
+        revision++;
         if (!file.isFile()) {
             point1 = null;
             point2 = null;

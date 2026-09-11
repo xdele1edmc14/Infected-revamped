@@ -47,6 +47,12 @@ public final class InfectedRespawnListener implements Listener {
     @EventHandler
     public void onPlayerRespawn(PlayerRespawnEvent event) {
         Player player = event.getPlayer();
+        if (gameManager.isCleanupRespawnPending(player)) {
+            event.setRespawnLocation(player.getWorld().getSpawnLocation());
+            gameManager.getPlugin().getServer().getScheduler().runTask(
+                    gameManager.getPlugin(), () -> gameManager.completeCleanupRespawn(player));
+            return;
+        }
         RoundPhase phase = gameManager.getPhase();
         if ((phase == RoundPhase.ACTIVE || phase == RoundPhase.ENDING)
                 && gameManager.isEliminatedInfected(player)) {
@@ -71,7 +77,7 @@ public final class InfectedRespawnListener implements Listener {
             if (survivorSpawns.isEmpty()) {
                 player.sendMessage(ChatColor.RED
                         + "No survivor respawn is available. The round is being cancelled.");
-                gameManager.cancelForUnsafeInfectedRespawn();
+                gameManager.cancelForUnavailableInfectedRespawn();
                 return;
             }
             event.setRespawnLocation(survivorSpawns.get(random.nextInt(survivorSpawns.size())));
@@ -86,8 +92,8 @@ public final class InfectedRespawnListener implements Listener {
                 gameManager.roundSpawnLocations(SpawnRole.INFECTED_RESPAWN), random);
         if (holdingSpawn.isEmpty() || configured.isEmpty()) {
             player.sendMessage(ChatColor.RED
-                    + "No safe infected cage or respawn is available. The round is being cancelled.");
-            gameManager.cancelForUnsafeInfectedRespawn();
+                    + "The infected holding spawn or respawn is unavailable. The round is being cancelled.");
+            gameManager.cancelForUnavailableInfectedRespawn();
             return;
         }
 
@@ -96,35 +102,32 @@ public final class InfectedRespawnListener implements Listener {
         potionEffects.applyBlindness(player, (int) RESPAWN_COOLDOWN_TICKS);
 
         long roundId = gameManager.currentRoundId();
-        gameManager.getPlugin().getServer().getScheduler().runTaskLater(
-                gameManager.getPlugin(),
-                () -> releaseIfStillActive(player, roundId),
-                RESPAWN_COOLDOWN_TICKS
-        );
+        gameManager.scheduleRoundTask(
+                () -> releaseIfStillActive(player, roundId), RESPAWN_COOLDOWN_TICKS);
     }
 
     private void releaseIfStillActive(Player player, long roundId) {
         if (!player.isOnline()) {
             return;
         }
-        potionEffects.removeBlindness(player);
         if (gameManager.currentRoundId() != roundId
                 || gameManager.getPhase() != RoundPhase.ACTIVE
                 || gameManager.roleOf(player) != ParticipantRole.INFECTED) {
             return;
         }
+        potionEffects.removeBlindness(player);
         Optional<Location> respawn = InfectedRespawnSelector.select(
                 gameManager.roundSpawnLocations(SpawnRole.INFECTED_RESPAWN), random);
         if (respawn.isEmpty()) {
             player.sendMessage(ChatColor.RED
-                    + "No safe infected respawn is available. The round is being cancelled.");
-            gameManager.cancelForUnsafeInfectedRespawn();
+                    + "No infected respawn is available. The round is being cancelled.");
+            gameManager.cancelForUnavailableInfectedRespawn();
             return;
         }
         if (!gameManager.teleportInfectedToRespawn(player, respawn.get())) {
             player.sendMessage(ChatColor.RED
                     + "Your infected respawn was cancelled. The round is being cancelled.");
-            gameManager.cancelForUnsafeInfectedRespawn();
+            gameManager.cancelForUnavailableInfectedRespawn();
             return;
         }
 
@@ -161,7 +164,6 @@ public final class InfectedRespawnListener implements Listener {
             if (buffEnabled) {
                 player.addPotionEffect(new PotionEffect(
                         PotionEffectType.RESISTANCE, Integer.MAX_VALUE, 1, false, false, true));
-                player.getInventory().addItem(new ItemStack(Material.COMPASS));
             }
         }
     }

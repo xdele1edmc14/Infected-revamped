@@ -3,15 +3,19 @@ package me.DaWHeL.infected;
 import me.DaWHeL.infected.Roles.Survivor;
 import org.bukkit.Location;
 import org.bukkit.GameMode;
+import org.bukkit.Material;
 import org.bukkit.Server;
 import org.bukkit.World;
 import org.bukkit.Chunk;
 import org.bukkit.configuration.file.YamlConfiguration;
+import org.bukkit.boss.BarColor;
+import org.bukkit.boss.BarStyle;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.PlayerInventory;
 import org.bukkit.scheduler.BukkitTask;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.util.EnumMap;
 import java.util.LinkedHashMap;
@@ -30,11 +34,16 @@ import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.ArgumentMatchers.contains;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doCallRealMethod;
 import static org.mockito.Mockito.doNothing;
@@ -55,12 +64,16 @@ class GameManagerLifecycleTest {
     private PluginTaskScheduler scheduler;
     private GameManager gameManager;
     private ParticipantRoleFactory roleFactory;
+    private GameManager.InfectedBuffLoadout buffLoadout;
     private Map<SpawnRole, Consumer<TeleportBatchResult>> completions;
     private Runnable[] delayedRelease;
     private Map<Long, Runnable> scheduledTasks;
     private List<World> retainedWorlds;
     private Consumer<Player> beforeReleaseTeleport;
     private BiConsumer<Player, Boolean> afterReleaseTeleport;
+    private RoundTimeBossBar roundTimeBossBar;
+    private GameManager.RoundTimeBossBarFactory bossBarFactory;
+    private TrackingCompass trackingCompass;
 
     @BeforeEach
     void setUp() {
@@ -71,6 +84,11 @@ class GameManagerLifecycleTest {
         teleportManager = mock(TeleportManager.class);
         scheduler = mock(PluginTaskScheduler.class);
         roleFactory = mock(ParticipantRoleFactory.class);
+        buffLoadout = mock(GameManager.InfectedBuffLoadout.class);
+        roundTimeBossBar = mock(RoundTimeBossBar.class);
+        bossBarFactory = mock(GameManager.RoundTimeBossBarFactory.class);
+        trackingCompass = mock(TrackingCompass.class);
+        when(bossBarFactory.create(any(), any(), any(), any())).thenReturn(roundTimeBossBar);
         when(plugin.getServer()).thenReturn(server);
         when(plugin.getConfig()).thenReturn(config);
         when(scheduler.runLater(any(Runnable.class), anyLong())).thenReturn(mock(BukkitTask.class));
@@ -82,7 +100,10 @@ class GameManagerLifecycleTest {
                 scheduler,
                 new RoundStartValidator(),
                 new Random(1),
-                roleFactory
+                roleFactory,
+                buffLoadout,
+                bossBarFactory,
+                trackingCompass
         ));
         doNothing().when(gameManager).resetPlayerState(any(Player.class));
         when(roleFactory.createInfected(any(Player.class))).thenAnswer(invocation -> {
@@ -155,6 +176,138 @@ class GameManagerLifecycleTest {
     }
 
     @Test
+    void roundModeCanOnlyChangeInTheLobby() {
+        assertEquals(RoundMode.DEATHMATCH, gameManager.selectedRoundMode());
+
+        RoundActionResult lobbyChange = gameManager.cycleRoundMode();
+
+        assertAll(
+                () -> assertTrue(lobbyChange.success()),
+                () -> assertEquals(RoundMode.TIME_LIMIT, gameManager.selectedRoundMode())
+        );
+
+        startActiveRound(2, 1);
+        RoundActionResult activeChange = gameManager.cycleRoundMode();
+
+        assertAll(
+                () -> assertFalse(activeChange.success()),
+                () -> assertEquals(RoundMode.TIME_LIMIT, gameManager.selectedRoundMode())
+        );
+    }
+
+    @Test
+    void deathmatchSnapshotsItsOwnStartingZombieCountAndLives() {
+        config.set("settings.modes.deathmatch.starting-zombies", 2);
+        config.set("settings.modes.deathmatch.infected-lives", 4);
+        configureValidSetup(5, 1);
+        for (int index = 0; index < 5; index++) {
+            addLobbyPlayer("deathmatch-" + index);
+        }
+
+        assertTrue(gameManager.startGame().success());
+        completions.get(SpawnRole.SURVIVOR).accept(success(3));
+        delayedRelease[0].run();
+        completions.get(SpawnRole.INFECTED_RELEASE).accept(success(2));
+
+        assertAll(
+                () -> assertEquals(RoundMode.DEATHMATCH, gameManager.activeRoundMode()),
+                () -> assertEquals(2, gameManager.getInfected().size()),
+                () -> assertEquals(4, gameManager.configuredInfectedLives()),
+                () -> assertEquals(4,
+                        gameManager.remainingInfectedLives(gameManager.getInfected().getFirst().getPlayer())),
+                () -> assertEquals(0, gameManager.roundTimeRemainingSeconds()),
+                () -> assertEquals("No Limit", gameManager.roundTimeDisplay())
+        );
+    }
+
+    @Test
+    void startStateAndActiveRulesCannotSilentlyDriftAfterConfirmationOrStart() {
+        config.set("settings.modes.deathmatch.starting-zombies", 1);
+        config.set("settings.modes.deathmatch.infected-lives", 4);
+        String confirmedState = gameManager.roundStartStateKey();
+
+        config.set("settings.modes.deathmatch.infected-lives", 5);
+        assertNotEquals(confirmedState, gameManager.roundStartStateKey());
+
+        startActiveRound(3, 1);
+        config.set("settings.modes.deathmatch.starting-zombies", 2);
+        config.set("settings.modes.deathmatch.infected-lives", 9);
+
+        assertAll(
+                () -> assertEquals(1, gameManager.getInfected().size()),
+                () -> assertEquals(5, gameManager.configuredInfectedLives()),
+                () -> assertEquals(RoundMode.DEATHMATCH, gameManager.activeRoundMode())
+        );
+    }
+
+    @Test
+    void timeLimitForcesOneLifeAndAwardsSurvivorsWhenActiveTimeExpires() {
+        config.set("settings.modes.time-limit.starting-zombies", 1);
+        config.set("settings.modes.time-limit.time-limit-seconds", 2);
+        assertTrue(gameManager.cycleRoundMode().success());
+        startActiveRound(3, 1);
+        Player infected = gameManager.getInfected().getFirst().getPlayer();
+        ArgumentCaptor<Runnable> timer = ArgumentCaptor.forClass(Runnable.class);
+        verify(scheduler).runRepeating(timer.capture(), eq(20L), eq(20L));
+
+        assertAll(
+                () -> assertEquals(RoundMode.TIME_LIMIT, gameManager.activeRoundMode()),
+                () -> assertEquals(1, gameManager.configuredInfectedLives()),
+                () -> assertEquals(1, gameManager.remainingInfectedLives(infected)),
+                () -> assertEquals(2, gameManager.roundTimeRemainingSeconds()),
+                () -> assertEquals("0:02", gameManager.roundTimeDisplay())
+        );
+
+        timer.getValue().run();
+        assertAll(
+                () -> assertEquals(RoundPhase.ACTIVE, gameManager.getPhase()),
+                () -> assertEquals(1, gameManager.roundTimeRemainingSeconds())
+        );
+
+        timer.getValue().run();
+        assertEquals(RoundPhase.ENDING, gameManager.getPhase());
+        verify(server).broadcastMessage(org.mockito.ArgumentMatchers.contains("time limit"));
+    }
+
+    @Test
+    void staleTimeLimitCallbackCannotEndANewerOrStoppedRound() {
+        config.set("settings.modes.time-limit.time-limit-seconds", 1);
+        assertTrue(gameManager.cycleRoundMode().success());
+        startActiveRound(2, 1);
+        ArgumentCaptor<Runnable> timer = ArgumentCaptor.forClass(Runnable.class);
+        verify(scheduler).runRepeating(timer.capture(), eq(20L), eq(20L));
+        Runnable staleTimer = timer.getValue();
+
+        assertTrue(gameManager.stopGame());
+        staleTimer.run();
+
+        verify(server, never()).broadcastMessage(org.mockito.ArgumentMatchers.contains("time limit"));
+    }
+
+    @Test
+    void timeLimitBossBarStartsAtFullTimeUpdatesEachTickAndClosesOnStop() {
+        config.set("settings.modes.time-limit.time-limit-seconds", 2);
+        config.set("settings.modes.time-limit.boss-bar.enabled", true);
+        config.set("settings.modes.time-limit.boss-bar.title", "&bEnds in {time}");
+        config.set("settings.modes.time-limit.boss-bar.color", "BLUE");
+        config.set("settings.modes.time-limit.boss-bar.style", "SEGMENTED_10");
+        assertTrue(gameManager.cycleRoundMode().success());
+
+        startActiveRound(3, 1);
+
+        verify(bossBarFactory).create(plugin, "&bEnds in {time}", BarColor.BLUE, BarStyle.SEGMENTED_10);
+        verify(roundTimeBossBar).update(eq(2), eq(2), any());
+        ArgumentCaptor<Runnable> timer = ArgumentCaptor.forClass(Runnable.class);
+        verify(scheduler).runRepeating(timer.capture(), eq(20L), eq(20L));
+
+        timer.getValue().run();
+        verify(roundTimeBossBar).update(eq(1), eq(2), any());
+
+        assertTrue(gameManager.stopGame());
+        verify(roundTimeBossBar).close();
+    }
+
+    @Test
     void activeChestMutationLeasePreventsARoundFromStartingMidOperation() {
         gameManager.setRoundStartAllowed(() -> false);
 
@@ -163,6 +316,165 @@ class GameManagerLifecycleTest {
         assertFalse(result.success());
         assertTrue(result.message().contains("chest operation"));
         assertEquals(RoundPhase.LOBBY, gameManager.getPhase());
+    }
+
+    @Test
+    void infectedBuffsDoNotOwnTheCompassTracker() {
+        startActiveRound(3, 1);
+        Player initialInfected = gameManager.getInfected().getFirst().getPlayer();
+        clearInvocations(scheduler);
+
+        gameManager.setBuffEnabled(true);
+        gameManager.setBuffEnabled(true);
+
+        verify(buffLoadout).applyBoosted(initialInfected);
+        verifyNoInteractions(scheduler);
+
+        gameManager.setBuffEnabled(false);
+
+        verify(buffLoadout).applyBase(initialInfected);
+        verifyNoInteractions(scheduler);
+    }
+
+    @Test
+    void activeCompassTrackerPointsInfectedAtNearestSurvivor() {
+        startActiveRound(3, 1);
+        Player zombie = gameManager.getInfected().getFirst().getPlayer();
+        Player nearestSurvivor = gameManager.getSurvivors().getFirst().getPlayer();
+        Player fartherSurvivor = gameManager.getSurvivors().getLast().getPlayer();
+        World world = mock(World.class);
+        Location zombieLocation = new Location(world, 0.0, 64.0, 0.0);
+        Location nearestLocation = new Location(world, 10.0, 64.0, 0.0);
+        Location fartherLocation = new Location(world, 50.0, 64.0, 0.0);
+        when(zombie.getLocation()).thenReturn(zombieLocation);
+        when(zombie.getInventory().contains(Material.COMPASS)).thenReturn(true);
+        when(nearestSurvivor.getLocation()).thenReturn(nearestLocation);
+        when(fartherSurvivor.getLocation()).thenReturn(fartherLocation);
+        ArgumentCaptor<Runnable> tracker = ArgumentCaptor.forClass(Runnable.class);
+
+        verify(scheduler).runRepeating(tracker.capture(), eq(0L), eq(20L));
+        tracker.getValue().run();
+
+        verify(zombie).setCompassTarget(nearestLocation);
+    }
+
+    @Test
+    void timeLimitCompassActivatesOnlyAfterCrossingTheConfiguredBoundary() {
+        config.set("settings.modes.time-limit.starting-zombies", 1);
+        config.set("settings.modes.time-limit.time-limit-seconds", 301);
+        config.set("settings.modes.time-limit.tracking-compass.give-below-minutes", 5);
+        assertTrue(gameManager.cycleRoundMode().success());
+        startActiveRound(3, 1);
+        Player zombie = gameManager.getInfected().getFirst().getPlayer();
+        clearInvocations(trackingCompass);
+        ArgumentCaptor<Runnable> timer = ArgumentCaptor.forClass(Runnable.class);
+        verify(scheduler).runRepeating(timer.capture(), eq(20L), eq(20L));
+
+        timer.getValue().run();
+        verify(trackingCompass, never()).ensurePresent(zombie);
+
+        timer.getValue().run();
+        verify(trackingCompass).ensurePresent(zombie);
+        assertTrue(gameManager.isTrackingCompassActive());
+    }
+
+    @Test
+    void deathmatchCompassDisablesBelowCutoffAndReturnsWhenZombieCountRecovers() {
+        config.set("settings.modes.deathmatch.tracking-compass.remove-below-zombies", 2);
+        startActiveRound(5, 2);
+        Player eliminated = gameManager.getInfected().getFirst().getPlayer();
+        Player remainingZombie = gameManager.getInfected().getLast().getPlayer();
+        Player converted = gameManager.getSurvivors().getFirst().getPlayer();
+        clearInvocations(trackingCompass);
+
+        assertTrue(gameManager.handleInfectedDeath(eliminated));
+        assertTrue(gameManager.handleInfectedDeath(eliminated));
+        assertFalse(gameManager.handleInfectedDeath(eliminated));
+        verify(trackingCompass).remove(remainingZombie);
+        assertFalse(gameManager.isTrackingCompassActive());
+
+        clearInvocations(trackingCompass);
+        gameManager.infectPlayer(converted, false);
+        verify(trackingCompass).ensurePresent(remainingZombie);
+        verify(trackingCompass).ensurePresent(converted);
+        assertTrue(gameManager.isTrackingCompassActive());
+    }
+
+    @Test
+    void adminCompassOverrideSupersedesAutomaticPolicy() {
+        config.set("settings.modes.deathmatch.tracking-compass.remove-below-zombies", 10);
+        startActiveRound(3, 1);
+        Player zombie = gameManager.getInfected().getFirst().getPlayer();
+        clearInvocations(trackingCompass);
+
+        assertTrue(gameManager.setTrackingCompassOverride(TrackingCompassOverride.ON).success());
+        verify(trackingCompass).ensurePresent(zombie);
+        assertTrue(gameManager.isTrackingCompassActive());
+
+        clearInvocations(trackingCompass);
+        assertTrue(gameManager.setTrackingCompassOverride(TrackingCompassOverride.OFF).success());
+        verify(trackingCompass).remove(zombie);
+        assertFalse(gameManager.isTrackingCompassActive());
+
+        assertTrue(gameManager.setTrackingCompassOverride(TrackingCompassOverride.AUTO).success());
+        assertFalse(gameManager.isTrackingCompassActive());
+    }
+
+    @Test
+    void compassStateTransitionsAreAnnouncedOnlyOnce() {
+        config.set("settings.modes.deathmatch.tracking-compass.remove-below-zombies", 2);
+        startActiveRound(4, 2);
+        ArgumentCaptor<Runnable> tracker = ArgumentCaptor.forClass(Runnable.class);
+        verify(scheduler).runRepeating(tracker.capture(), eq(0L), eq(20L));
+
+        tracker.getValue().run();
+        tracker.getValue().run();
+        verify(server, times(1)).broadcastMessage(contains("enabled"));
+
+        Player eliminated = gameManager.getInfected().getFirst().getPlayer();
+        assertTrue(gameManager.handleInfectedDeath(eliminated));
+        assertTrue(gameManager.handleInfectedDeath(eliminated));
+        assertFalse(gameManager.handleInfectedDeath(eliminated));
+        tracker.getValue().run();
+        verify(server, times(1)).broadcastMessage(contains("disabled"));
+    }
+
+    @Test
+    void playersInfectedAfterBuffActivationReceiveTheBuffImmediately() {
+        startActiveRound(3, 1);
+        Player converted = gameManager.getSurvivors().getFirst().getPlayer();
+
+        gameManager.setBuffEnabled(true);
+        gameManager.infectPlayer(converted, false);
+
+        verify(buffLoadout).applyBoosted(converted);
+    }
+
+    @Test
+    void endingTheRoundClearsBuffStateAndCancelsTracking() {
+        BukkitTask tracker = mock(BukkitTask.class);
+        when(scheduler.runRepeating(any(Runnable.class), anyLong(), anyLong())).thenReturn(tracker);
+        startActiveRound(2, 1);
+        gameManager.setBuffEnabled(true);
+
+        assertTrue(gameManager.stopGame());
+
+        assertFalse(gameManager.isBuffEnabled());
+        verify(tracker).cancel();
+        verify(trackingCompass, atLeastOnce()).remove(any(Player.class));
+        assertEquals(TrackingCompassOverride.AUTO, gameManager.trackingCompassOverride());
+    }
+
+    @Test
+    void externallyScheduledRoundCallbackIsCancelledWhenTheRoundEnds() {
+        startActiveRound(2, 1);
+        BukkitTask callback = mock(BukkitTask.class);
+        when(scheduler.runLater(any(Runnable.class), org.mockito.ArgumentMatchers.eq(60L))).thenReturn(callback);
+
+        gameManager.scheduleRoundTask(() -> { }, 60L);
+        gameManager.stopGame();
+
+        verify(callback).cancel();
     }
 
     @Test
@@ -279,6 +591,22 @@ class GameManagerLifecycleTest {
     }
 
     @Test
+    void deploymentLocksSurvivorsOnlyUntilEverySurvivorTeleportCompletes() {
+        configureValidSetup(3, 1);
+        addLobbyPlayer("first");
+        addLobbyPlayer("second");
+        addLobbyPlayer("third");
+
+        assertTrue(gameManager.startGame().success());
+        List<Player> survivors = gameManager.getSurvivors().stream().map(Survivor::getPlayer).toList();
+        assertTrue(survivors.stream().allMatch(gameManager::isDeploymentLockedSurvivor));
+
+        completions.get(SpawnRole.SURVIVOR).accept(success(2));
+
+        assertTrue(survivors.stream().noneMatch(gameManager::isDeploymentLockedSurvivor));
+    }
+
+    @Test
     void waitsForOneDeduplicatedSpawnChunkPreloadBeforeDeploymentAndReleasesItsTicket() {
         Location spawn = configureValidSetup(3, 1);
         spawn.setX(8.5);
@@ -305,6 +633,26 @@ class GameManagerLifecycleTest {
 
         assertTrue(gameManager.stopGame());
         verify(chunk).removePluginChunkTicket(plugin);
+    }
+
+    @Test
+    void spawnPreparationFailureReportsItsActualCause() {
+        Location spawn = configureValidSetup(2, 1);
+        when(spawn.getWorld().getChunkAtAsync(anyInt(), anyInt(), org.mockito.ArgumentMatchers.eq(false)))
+                .thenReturn(CompletableFuture.failedFuture(
+                        new IllegalStateException("Spawn chunk greenfield 10, -3 is not generated.")));
+        addLobbyPlayer("preload-failure-first");
+        addLobbyPlayer("preload-failure-second");
+
+        StartResult result = gameManager.startGame();
+
+        assertAll(
+                () -> assertFalse(result.success()),
+                () -> assertEquals(
+                        "Spawn preparation failed: Spawn chunk greenfield 10, -3 is not generated.",
+                        result.message()),
+                () -> assertEquals(RoundPhase.ENDING, gameManager.getPhase())
+        );
     }
 
     @Test
@@ -661,6 +1009,7 @@ class GameManagerLifecycleTest {
                 () -> assertEquals(RoundPhase.ACTIVE, gameManager.getPhase())
         );
         verify(gameManager).resetPlayerState(removed);
+        verify(removed).setGameMode(GameMode.SPECTATOR);
         verify(roleFactory, never()).createSurvivor(removed);
     }
 
@@ -675,6 +1024,7 @@ class GameManagerLifecycleTest {
         when(scoreboards.getMainScoreboard()).thenReturn(mainScoreboard);
         World world = mock(World.class);
         when(player.getWorld()).thenReturn(world);
+        when(player.getMaxHealth()).thenReturn(20.0);
         when(world.getSpawnLocation()).thenReturn(new Location(world, 0.5, 64, 0.5));
         doCallRealMethod().when(gameManager).resetPlayerState(player);
 
@@ -684,6 +1034,13 @@ class GameManagerLifecycleTest {
         verify(inventory).clear();
         verify(inventory).setHelmet(null);
         verify(player).setScoreboard(mainScoreboard);
+        verify(player).setHealth(20.0);
+        verify(player).setFoodLevel(20);
+        verify(player).setSaturation(5.0f);
+        verify(player).setExhaustion(0.0f);
+        verify(player).setFireTicks(0);
+        verify(player).setFallDistance(0.0f);
+        verify(player).setVelocity(new org.bukkit.util.Vector());
     }
 
     @Test
@@ -857,6 +1214,9 @@ class GameManagerLifecycleTest {
         config.set("settings.teleport-batch-size", 2);
         config.set("settings.teleport-delay", 40);
         config.set("settings.infected-teleport-delay", 10);
+        if (!config.contains("settings.modes.deathmatch.tracking-compass.remove-below-zombies")) {
+            config.set("settings.modes.deathmatch.tracking-compass.remove-below-zombies", 1);
+        }
         Location location = safeLocation();
         when(spawnRepository.loadedHoldingSpawn()).thenReturn(Optional.of(location));
         for (SpawnRole role : SpawnRole.values()) {
@@ -877,6 +1237,7 @@ class GameManagerLifecycleTest {
         when(border.isInside(any(Location.class))).thenReturn(true);
         when(world.getMinHeight()).thenReturn(-64);
         when(world.getMaxHeight()).thenReturn(320);
+        when(world.isChunkLoaded(anyInt(), anyInt())).thenReturn(true);
         when(world.getBlockAt(0, 63, 0)).thenReturn(ground);
         when(world.getBlockAt(0, 64, 0)).thenReturn(feet);
         when(world.getBlockAt(0, 65, 0)).thenReturn(head);
@@ -890,6 +1251,22 @@ class GameManagerLifecycleTest {
         when(feet.isPassable()).thenReturn(true);
         when(head.getType()).thenReturn(org.bukkit.Material.AIR);
         when(head.isPassable()).thenReturn(true);
+        when(world.getBlockAt(anyInt(), anyInt(), anyInt())).thenAnswer(invocation -> {
+            int x = invocation.getArgument(0);
+            int y = invocation.getArgument(1);
+            int z = invocation.getArgument(2);
+            org.bukkit.block.Block block = mock(org.bukkit.block.Block.class);
+            if (y == 63) {
+                when(block.getType()).thenReturn(org.bukkit.Material.STONE);
+                when(block.isPassable()).thenReturn(false);
+                when(block.getBoundingBox()).thenReturn(
+                        new org.bukkit.util.BoundingBox(x, y, z, x + 1, y + 1, z + 1));
+            } else {
+                when(block.getType()).thenReturn(org.bukkit.Material.AIR);
+                when(block.isPassable()).thenReturn(true);
+            }
+            return block;
+        });
         return location;
     }
 

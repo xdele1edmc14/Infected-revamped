@@ -6,6 +6,7 @@ import org.bukkit.entity.EvokerFangs;
 import org.bukkit.entity.Player;
 import org.bukkit.entity.Projectile;
 import org.bukkit.entity.TNTPrimed;
+import org.bukkit.entity.Wolf;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.event.entity.EntityDamageEvent;
 import org.junit.jupiter.api.Test;
@@ -75,6 +76,17 @@ class DamageAttackerResolverTest {
         EntityDamageByEntityEvent event = mock(EntityDamageByEntityEvent.class);
         when(fangs.getOwner()).thenReturn(owner);
         when(event.getDamager()).thenReturn(fangs);
+
+        assertEquals(owner, resolver.resolve(event).orElseThrow());
+    }
+
+    @Test
+    void resolvesThePlayerOwnerOfATameableAttacker() {
+        Player owner = mock(Player.class);
+        Wolf wolf = mock(Wolf.class);
+        EntityDamageByEntityEvent event = mock(EntityDamageByEntityEvent.class);
+        when(wolf.getOwner()).thenReturn(owner);
+        when(event.getDamager()).thenReturn(wolf);
 
         assertEquals(owner, resolver.resolve(event).orElseThrow());
     }

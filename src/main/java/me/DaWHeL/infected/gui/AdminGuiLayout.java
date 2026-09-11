@@ -11,6 +11,7 @@ public final class AdminGuiLayout {
     public static final int STOP_EVENT = 22;
     public static final int RELOAD_CONFIG = 24;
     public static final int MAIN_BACK = 27;
+    public static final int ROUND_MODE = 29;
     public static final int RANDOM_WEAPON_CHESTS = 31;
     public static final int QUICK_HELP = 34;
     public static final int MAIN_CLOSE = 35;

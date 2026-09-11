@@ -1,7 +1,7 @@
 # Title shown only to an infected player when they die.
 infected-death:
   title: "&c&lYOU DIED"
-  subtitle: "&7Respawning in 3 seconds..."
+  subtitle: "&7Respawn to begin the 3-second cooldown..."
   out-of-lives-subtitle: "&4Your lives have run out!"
   timings:
     fade-in: 10

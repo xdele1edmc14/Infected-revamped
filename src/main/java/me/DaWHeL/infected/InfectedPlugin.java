@@ -24,6 +24,10 @@ public final class InfectedPlugin extends JavaPlugin {
 
     private GameManager gameManager;
     private TeleportManager teleportManager;
+    private WeaponChestService weaponChestService;
+    private GeneratedChestService generatedChestService;
+    private InfectedDeathListener infectedDeathListener;
+    private ScoreboardUpdateScheduler scoreboardUpdateScheduler;
 
     @Override
     public void onEnable() {
@@ -60,14 +64,14 @@ public final class InfectedPlugin extends JavaPlugin {
         NamespacedKey generatedChestKey = new NamespacedKey(this, "generated-weapon-chest");
         ChestOperationGate chestOperationGate = new ChestOperationGate();
         WeaponSelectionListener weaponSelectionListener = new WeaponSelectionListener(this, weaponLootRepository);
-        WeaponChestService weaponChestService = new WeaponChestService(
+        weaponChestService = new WeaponChestService(
                 gameManager,
                 weaponLootRepository::snapshot,
                 new ChestDiscoveryService(generatedChestKey),
                 new ChestLootGenerator(new Random()),
                 chestOperationGate
         );
-        GeneratedChestService generatedChestService = new GeneratedChestService(
+        generatedChestService = new GeneratedChestService(
                 gameManager, weaponLootRepository::snapshot, generatedChestRepository,
                 new OutdoorChestSiteValidator(), generatedChestKey, chestOperationGate);
         gameManager.setRoundStartAllowed(() -> !chestOperationGate.isActive());
@@ -78,6 +82,7 @@ public final class InfectedPlugin extends JavaPlugin {
         AdminGuiManager adminGuiManager = new AdminGuiManager(
                 this, gameManager, adminSetupService, weaponLootGuiManager::openWizard,
                 () -> {
+                    refreshRuntimeConfiguration();
                     java.util.List<String> errors = weaponLootRepository.reload();
                     errors = new java.util.ArrayList<>(errors);
                     errors.addAll(generatedChestRepository.reload());
@@ -99,7 +104,7 @@ public final class InfectedPlugin extends JavaPlugin {
         getCommand("addteleport").setExecutor(new AddTeleportCommand(this));
         getCommand("removeteleport").setExecutor(new RemoveTeleportCommand(this));
         getCommand("listteleportpoints").setExecutor(new ListTeleportPoints(this));
-        getCommand("reloadinfected").setExecutor(new Reload(this, gameManager));
+        getCommand("reloadinfected").setExecutor(new Reload(this, gameManager, this::refreshRuntimeConfiguration));
         getCommand("tttp").setExecutor(new TeleportToTeleportPoint(this));
         getCommand("removeplayer").setExecutor(new RemovePlayer(gameManager));
         getCommand("buffinfected").setExecutor(new BuffInfectedCommand(gameManager, this));
@@ -117,17 +122,16 @@ public final class InfectedPlugin extends JavaPlugin {
         getServer().getPluginManager().registerEvents(new InfectedInventoryLockListener(gameManager), this);
         getServer().getPluginManager().registerEvents(
                 new InfectedRespawnListener(gameManager, spawnRepository), this);
-        getServer().getPluginManager().registerEvents(
-                new InfectedDeathListener(gameManager, DeathTitleMessages.load(this)), this);
+        infectedDeathListener = new InfectedDeathListener(gameManager, DeathTitleMessages.load(this));
+        getServer().getPluginManager().registerEvents(infectedDeathListener, this);
         getServer().getPluginManager().registerEvents(new AdminGuiListener(this, adminGuiManager), this);
         getServer().getPluginManager().registerEvents(weaponSelectionListener, this);
         getServer().getPluginManager().registerEvents(new WeaponLootGuiListener(this, weaponLootGuiManager), this);
 
-        long scoreboardUpdateInterval = Math.max(1L,
-                getConfig().getLong("scoreboard.update-interval-ticks", 20L));
-        Bukkit.getScheduler().runTaskTimer(this, () -> {
-            gameManager.getScoreboardManager().updateScoreboard();
-        }, 0L, scoreboardUpdateInterval);
+        scoreboardUpdateScheduler = new ScoreboardUpdateScheduler(
+                this, getServer().getScheduler(),
+                () -> gameManager.getScoreboardManager().updateScoreboard());
+        scoreboardUpdateScheduler.reschedule(scoreboardUpdateInterval());
 
         getLogger().info("##################################");
         getLogger().info("#                                #");
@@ -138,6 +142,15 @@ public final class InfectedPlugin extends JavaPlugin {
 
     @Override
     public void onDisable() {
+        if (scoreboardUpdateScheduler != null) {
+            scoreboardUpdateScheduler.shutdown();
+        }
+        if (weaponChestService != null) {
+            weaponChestService.shutdown();
+        }
+        if (generatedChestService != null) {
+            generatedChestService.shutdown();
+        }
         if (gameManager != null) {
             gameManager.shutdown();
         }
@@ -154,5 +167,21 @@ public final class InfectedPlugin extends JavaPlugin {
 
     public TeleportManager getTeleportManager() {
         return teleportManager;
+    }
+
+    private void refreshRuntimeConfiguration() {
+        if (gameManager != null) {
+            gameManager.getScoreboardManager().reloadConfiguration();
+        }
+        if (infectedDeathListener != null) {
+            infectedDeathListener.reloadDeathTitles(DeathTitleMessages.load(this));
+        }
+        if (scoreboardUpdateScheduler != null) {
+            scoreboardUpdateScheduler.reschedule(scoreboardUpdateInterval());
+        }
+    }
+
+    private long scoreboardUpdateInterval() {
+        return Math.max(1L, getConfig().getLong("scoreboard.update-interval-ticks", 20L));
     }
 }

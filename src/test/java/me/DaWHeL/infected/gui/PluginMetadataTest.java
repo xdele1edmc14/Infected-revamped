@@ -21,7 +21,8 @@ class PluginMetadataTest {
                 () -> assertEquals("2.0.0", metadata.getString("version")),
                 () -> assertTrue(metadata.isConfigurationSection("commands.infected")),
                 () -> assertEquals("infected.admin", metadata.getString("commands.infected.permission")),
-                () -> assertEquals("/infected [gui addteleport [survivor|release|respawn] <name>]",
+                () -> assertEquals(
+                        "/infected [gui addteleport [survivor|release|respawn] <name> | compass <on|off|auto|status>]",
                         metadata.getString("commands.infected.usage")),
                 () -> assertTrue(metadata.isConfigurationSection("commands.startinfected")),
                 () -> assertTrue(metadata.isConfigurationSection("commands.addteleport")),

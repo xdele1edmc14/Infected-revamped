@@ -13,6 +13,7 @@ import java.util.Random;
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -58,18 +59,23 @@ class SpawnRepositoryTest {
     }
 
     @Test
-    void migrationRunsOnlyOnceAndReportsMalformedLegacyPaths() {
+    void migrationRetriesMalformedLegacyPathsAfterTheyAreRepaired() {
         config.set("teleports.Broken.x", 12);
 
         SpawnRepository.MigrationResult first = repository.migrateLegacyTeleports();
-        SpawnRepository.MigrationResult second = repository.migrateLegacyTeleports();
+        boolean markedAfterFirst = config.getBoolean("migrations.role-spawns", false);
+        setStored("teleports.Broken", "arena", 12, 70, 4, 0, 0);
+        SpawnRepository.MigrationResult repaired = repository.migrateLegacyTeleports();
+        SpawnRepository.MigrationResult complete = repository.migrateLegacyTeleports();
 
         assertAll(
                 () -> assertTrue(first.migrated()),
                 () -> assertEquals(List.of("teleports.Broken"), first.skippedPaths()),
-                () -> assertFalse(second.migrated()),
-                () -> assertEquals(0, second.copiedEntries()),
-                () -> assertEquals(List.of(), second.skippedPaths())
+                () -> assertFalse(markedAfterFirst),
+                () -> assertTrue(repaired.migrated()),
+                () -> assertEquals(3, repaired.copiedEntries()),
+                () -> assertEquals(List.of(), repaired.skippedPaths()),
+                () -> assertFalse(complete.migrated())
         );
         verify(plugin, times(1)).saveConfig();
     }
@@ -137,6 +143,38 @@ class SpawnRepositoryTest {
                 () -> assertEquals(5.0, holding.x()),
                 () -> assertTrue(repository.points(SpawnRole.INFECTED_RELEASE).isEmpty())
         );
+    }
+
+    @Test
+    void rejectsSpawnRecordsWhenAnyNumericFieldIsMissing() {
+        for (String field : List.of("x", "y", "z", "yaw", "pitch")) {
+            config.set("spawns.survivor.test", null);
+            setStored("spawns.survivor.test", "arena", 1, 64, 2, 30, 4);
+            config.set("spawns.survivor.test." + field, null);
+
+            assertTrue(repository.points(SpawnRole.SURVIVOR).isEmpty(),
+                    () -> "Missing " + field + " must invalidate the spawn record.");
+        }
+    }
+
+    @Test
+    void rejectsNonNumericAndNonFiniteSpawnCoordinates() {
+        setStored("spawns.survivor.text", "arena", 1, 64, 2, 30, 4);
+        config.set("spawns.survivor.text.x", "1.0");
+        setStored("spawns.survivor.infinite", "arena", 1, 64, 2, 30, 4);
+        config.set("spawns.survivor.infinite.pitch", Double.POSITIVE_INFINITY);
+
+        assertTrue(repository.points(SpawnRole.SURVIVOR).isEmpty());
+    }
+
+    @Test
+    void refusesToSaveNonFiniteSpawnCoordinates() {
+        Location location = location("arena", Double.NaN, 70, 9, 0, 0);
+
+        assertThrows(IllegalArgumentException.class,
+                () -> repository.savePoint(SpawnRole.SURVIVOR, "broken", location));
+        assertFalse(config.contains("spawns.survivor.broken"));
+        verify(plugin, never()).saveConfig();
     }
 
     private void setStored(String path, String world, double x, double y, double z, double yaw, double pitch) {

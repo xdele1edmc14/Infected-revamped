@@ -72,6 +72,32 @@ class AdminGuiManagerTest {
     }
 
     @Test
+    void mainRoundModeControlCyclesTheLobbySelectionAndRefreshesTheMenu() {
+        when(gameManager.cycleRoundMode()).thenReturn(
+                RoundActionResult.accepted("Round mode set to Time Limit."));
+
+        manager.handleClick(administrator, AdminMenuHolder.root(AdminMenuHolder.MenuType.MAIN),
+                AdminGuiLayout.ROUND_MODE, ClickType.LEFT);
+
+        verify(gameManager).cycleRoundMode();
+        verify(administrator).sendMessage(contains("Time Limit"));
+        verify(manager).openMain(administrator);
+    }
+
+    @Test
+    void staleStartConfirmationCannotStartWithDifferentRoundRulesOrGeneration() {
+        when(gameManager.roundStartStateKey()).thenReturn("42|TIME_LIMIT|2|1|600");
+        AdminMenuHolder holder = AdminMenuHolder.confirmation(
+                AdminMenuHolder.ConfirmationAction.START, null, "41|TIME_LIMIT|2|1|600", 0);
+
+        manager.handleClick(administrator, holder, AdminGuiLayout.CONFIRM, ClickType.LEFT);
+
+        verify(gameManager, never()).startGame();
+        verify(administrator).sendMessage(contains("round setup changed"));
+        verify(manager).openMain(administrator);
+    }
+
+    @Test
     void roleSelectorRoutesEachCenteredControlToItsOwnSpawnGroup() {
         AdminMenuHolder holder = AdminMenuHolder.root(AdminMenuHolder.MenuType.TELEPORT_ROLES);
 
@@ -177,6 +203,20 @@ class AdminGuiManagerTest {
         verify(setupService, never()).deleteTeleportPoint(anyString());
         verify(administrator).sendMessage(contains("point changed"));
         verify(manager).openTeleportPoints(administrator, SpawnRole.SURVIVOR, 3);
+    }
+
+    @Test
+    void staleStopConfirmationCannotStopANewerRound() {
+        when(gameManager.getPhase()).thenReturn(RoundPhase.ACTIVE);
+        when(gameManager.currentRoundId()).thenReturn(42L);
+        AdminMenuHolder holder = AdminMenuHolder.confirmation(
+                AdminMenuHolder.ConfirmationAction.STOP, null, "41", 0);
+
+        manager.handleClick(administrator, holder, AdminGuiLayout.CONFIRM, ClickType.LEFT);
+
+        verify(gameManager, never()).stopGame();
+        verify(administrator).sendMessage(contains("different round"));
+        verify(manager).openMain(administrator);
     }
 
     @Test

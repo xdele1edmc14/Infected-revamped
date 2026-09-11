@@ -2,6 +2,8 @@ package me.DaWHeL.infected.gui;
 
 import me.DaWHeL.infected.GameManager;
 import me.DaWHeL.infected.SpawnRole;
+import me.DaWHeL.infected.RoundActionResult;
+import me.DaWHeL.infected.TrackingCompassOverride;
 import org.bukkit.ChatColor;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
@@ -39,13 +41,17 @@ public final class InfectedAdminCommand implements CommandExecutor, TabCompleter
             @NotNull String label,
             @NotNull String[] args
     ) {
-        if (!(sender instanceof Player player)) {
-            showConsoleStatus(sender);
+        if (sender instanceof Player player && !player.hasPermission(ADMIN_PERMISSION)) {
+            player.sendMessage(ChatColor.RED + "You do not have permission to use the Infected admin controls.");
             return true;
         }
 
-        if (!player.hasPermission(ADMIN_PERMISSION)) {
-            player.sendMessage(ChatColor.RED + "You do not have permission to use the Infected admin controls.");
+        if (args.length >= 1 && args[0].equalsIgnoreCase("compass")) {
+            return handleCompass(sender, args);
+        }
+
+        if (!(sender instanceof Player player)) {
+            showConsoleStatus(sender);
             return true;
         }
 
@@ -77,6 +83,33 @@ public final class InfectedAdminCommand implements CommandExecutor, TabCompleter
         return true;
     }
 
+    private boolean handleCompass(CommandSender sender, String[] args) {
+        if (args.length != 2) {
+            sender.sendMessage(ChatColor.YELLOW + "Usage: /infected compass <on|off|auto|status>");
+            return true;
+        }
+
+        if (args[1].equalsIgnoreCase("status")) {
+            sender.sendMessage(ChatColor.GRAY + "Tracking compasses: "
+                    + (gameManager.isTrackingCompassActive() ? ChatColor.GREEN + "ON" : ChatColor.RED + "OFF")
+                    + ChatColor.GRAY + " (" + gameManager.trackingCompassOverride().name().toLowerCase(Locale.ROOT)
+                    + ")");
+            return true;
+        }
+
+        TrackingCompassOverride override;
+        try {
+            override = TrackingCompassOverride.valueOf(args[1].toUpperCase(Locale.ROOT));
+        } catch (IllegalArgumentException ignored) {
+            sender.sendMessage(ChatColor.YELLOW + "Usage: /infected compass <on|off|auto|status>");
+            return true;
+        }
+
+        RoundActionResult result = gameManager.setTrackingCompassOverride(override);
+        sender.sendMessage((result.success() ? ChatColor.GREEN : ChatColor.RED) + result.message());
+        return true;
+    }
+
     private boolean addTeleportPoint(Player player, SpawnRole role, String name, boolean survivorShorthand) {
         try {
             AdminSetupService.validatePointName(name);
@@ -103,7 +136,8 @@ public final class InfectedAdminCommand implements CommandExecutor, TabCompleter
     private void showConsoleStatus(CommandSender sender) {
         int survivors = gameManager.getSurvivors().size();
         int infected = gameManager.getInfected().size();
-        AdminSetupService.SetupSnapshot snapshot = setupService.snapshot(survivors, infected);
+        AdminSetupService.SetupSnapshot snapshot = setupService.snapshot(
+                survivors, infected, gameManager.configuredStartingInfected());
 
         sender.sendMessage(ChatColor.GOLD + "Infected Event Control");
         sender.sendMessage(ChatColor.GRAY + "State: " + ChatColor.YELLOW + gameManager.getPhase().name());
@@ -125,7 +159,14 @@ public final class InfectedAdminCommand implements CommandExecutor, TabCompleter
             return List.of();
         }
         if (args.length == 1) {
-            return matching("gui", args[0]);
+            return List.of("gui", "compass").stream()
+                    .filter(candidate -> candidate.startsWith(args[0].toLowerCase(Locale.ROOT)))
+                    .toList();
+        }
+        if (args.length == 2 && args[0].equalsIgnoreCase("compass")) {
+            return List.of("on", "off", "auto", "status").stream()
+                    .filter(candidate -> candidate.startsWith(args[1].toLowerCase(Locale.ROOT)))
+                    .toList();
         }
         if (args.length == 2 && args[0].equalsIgnoreCase("gui")) {
             return matching("addteleport", args[1]);

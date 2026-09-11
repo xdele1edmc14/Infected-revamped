@@ -32,10 +32,22 @@ class RoundSpawnPoolTest {
         SpawnRepository repository = mock(SpawnRepository.class);
         World world = mock(World.class);
         Location spawn = new Location(world, 8.5, 64, 8.5);
+        List<Location> survivorSpawns = List.of(
+                new Location(world, 2.5, 64, 12.5),
+                new Location(world, 5.5, 64, 12.5),
+                new Location(world, 8.5, 64, 12.5),
+                new Location(world, 11.5, 64, 12.5),
+                new Location(world, 13.5, 64, 12.5));
+        List<Location> releaseSpawns = List.of(
+                new Location(world, 2.5, 64, 2.5),
+                new Location(world, 5.5, 64, 2.5),
+                new Location(world, 8.5, 64, 2.5),
+                new Location(world, 11.5, 64, 2.5),
+                new Location(world, 13.5, 64, 2.5));
         when(repository.loadedHoldingSpawn()).thenReturn(Optional.of(spawn));
-        for (SpawnRole role : SpawnRole.values()) {
-            when(repository.loadedLocations(role)).thenReturn(List.of(spawn));
-        }
+        when(repository.loadedLocations(SpawnRole.SURVIVOR)).thenReturn(survivorSpawns);
+        when(repository.loadedLocations(SpawnRole.INFECTED_RELEASE)).thenReturn(releaseSpawns);
+        when(repository.loadedLocations(SpawnRole.INFECTED_RESPAWN)).thenReturn(List.of(spawn));
 
         Map<String, Chunk> chunks = new LinkedHashMap<>();
         when(world.getChunkAtAsync(anyInt(), anyInt(), eq(false))).thenAnswer(invocation -> {
@@ -53,7 +65,7 @@ class RoundSpawnPoolTest {
                 SpawnRole.INFECTED_RELEASE, 125
         )).join();
 
-        assertEquals(2, chunks.size());
+        assertEquals(1, chunks.size());
         pool.releaseTickets(plugin);
         chunks.values().forEach(chunk -> verify(chunk).removePluginChunkTicket(plugin));
     }
@@ -86,6 +98,8 @@ class RoundSpawnPoolTest {
         when(repository.loadedHoldingSpawn()).thenReturn(Optional.of(firstLocation));
         EnumMap<SpawnRole, List<Location>> locations = new EnumMap<>(SpawnRole.class);
         locations.put(SpawnRole.SURVIVOR, List.of(firstLocation, secondLocation));
+        locations.put(SpawnRole.INFECTED_RELEASE, List.of(firstLocation));
+        locations.put(SpawnRole.INFECTED_RESPAWN, List.of(firstLocation));
         for (SpawnRole role : SpawnRole.values()) {
             when(repository.loadedLocations(role)).thenReturn(locations.getOrDefault(role, List.of()));
         }
@@ -106,9 +120,59 @@ class RoundSpawnPoolTest {
         verify(second).removePluginChunkTicket(plugin);
     }
 
+    @Test
+    void keepsConfiguredLandingsWithoutInspectingArenaBlocks() {
+        InfectedPlugin plugin = plugin();
+        SpawnRepository repository = mock(SpawnRepository.class);
+        World world = mock(World.class);
+        Location spawn = new Location(world, 8.5, 64, 8.5);
+        when(repository.loadedHoldingSpawn()).thenReturn(Optional.of(spawn));
+        for (SpawnRole role : SpawnRole.values()) {
+            when(repository.loadedLocations(role)).thenReturn(List.of(spawn));
+        }
+        Chunk chunk = mock(Chunk.class);
+        when(chunk.addPluginChunkTicket(plugin)).thenReturn(true);
+        when(world.getChunkAtAsync(anyInt(), anyInt(), eq(false)))
+                .thenReturn(CompletableFuture.completedFuture(chunk));
+
+        RoundSpawnPool pool = RoundSpawnPool.preload(
+                plugin, repository, Map.of(SpawnRole.SURVIVOR, 2)).join();
+
+        assertEquals(1, pool.locations(SpawnRole.SURVIVOR).size());
+        verify(world, org.mockito.Mockito.never()).getBlockAt(anyInt(), anyInt(), anyInt());
+        pool.releaseTickets(plugin);
+        verify(chunk).removePluginChunkTicket(plugin);
+    }
+
+    @Test
+    void keepsEveryConfiguredRespawnWithoutCollisionFiltering() {
+        InfectedPlugin plugin = plugin();
+        SpawnRepository repository = mock(SpawnRepository.class);
+        World world = mock(World.class);
+        Location safe = new Location(world, 8.5, 64, 8.5);
+        Location first = new Location(world, 1.5, 64, 8.5);
+        when(repository.loadedHoldingSpawn()).thenReturn(Optional.of(safe));
+        when(repository.loadedLocations(SpawnRole.SURVIVOR)).thenReturn(List.of(safe));
+        when(repository.loadedLocations(SpawnRole.INFECTED_RELEASE)).thenReturn(List.of(safe));
+        when(repository.loadedLocations(SpawnRole.INFECTED_RESPAWN)).thenReturn(List.of(first, safe));
+        Chunk chunk = mock(Chunk.class);
+        when(chunk.addPluginChunkTicket(plugin)).thenReturn(true);
+        when(world.getChunkAtAsync(anyInt(), anyInt(), eq(false)))
+                .thenReturn(CompletableFuture.completedFuture(chunk));
+
+        RoundSpawnPool pool = RoundSpawnPool.preload(plugin, repository, Map.of(
+                SpawnRole.SURVIVOR, 1,
+                SpawnRole.INFECTED_RELEASE, 1
+        )).join();
+
+        assertEquals(2, pool.locations(SpawnRole.INFECTED_RESPAWN).size());
+        assertEquals(1.5, pool.locations(SpawnRole.INFECTED_RESPAWN).getFirst().getX());
+    }
+
     private static InfectedPlugin plugin() {
         InfectedPlugin plugin = mock(InfectedPlugin.class);
         when(plugin.getLogger()).thenReturn(mock(Logger.class));
         return plugin;
     }
+
 }

@@ -132,6 +132,12 @@ final class StreamedGeneratedChestOperation {
         return result;
     }
 
+    void cancel(String reason) {
+        if (stage != Stage.DONE) {
+            fail(reason == null || reason.isBlank() ? "Generated chest operation was cancelled." : reason);
+        }
+    }
+
     ChestOperationProgress progress() {
         return switch (stage) {
             case PLAN -> new ChestOperationProgress("Finding sites", sampler.sites().size(), targetCount);
@@ -159,12 +165,15 @@ final class StreamedGeneratedChestOperation {
             }
             if (!pendingFootprint.ready()) return;
             List<LoadedChunkKey> acquired = retainFootprint(pendingFootprint);
-            java.util.Optional<ChestSite> validated = validator.validate(
-                    generationWorld, region, pendingCandidate.x(), pendingCandidate.z());
-            boolean accepted = sampler.consider(pendingCandidate, validated);
-            if (!accepted) releaseRetained(acquired);
-            pendingCandidate = null;
-            pendingFootprint = null;
+            try {
+                java.util.Optional<ChestSite> validated = validator.validate(
+                        generationWorld, region, pendingCandidate.x(), pendingCandidate.z());
+                sampler.consider(pendingCandidate, validated);
+            } finally {
+                releaseRetained(acquired, false);
+                pendingCandidate = null;
+                pendingFootprint = null;
+            }
         }
         if (!sampler.finished()) return;
         if (!sampler.complete()) {
@@ -178,7 +187,8 @@ final class StreamedGeneratedChestOperation {
     }
 
     private void loadOld(int budget) {
-        for (int processed = 0; processed < budget && oldLoadIndex < oldPlacements.size(); processed++) {
+        int processed = 0;
+        while (processed < budget && oldLoadIndex < oldPlacements.size()) {
             GeneratedChestPlacement placement = oldPlacements.get(oldLoadIndex);
             World world = worldLookup.apply(placement.world());
             if (world == null) {
@@ -189,13 +199,24 @@ final class StreamedGeneratedChestOperation {
                 pendingFootprint = beginFootprint(world, placement.x(), placement.z());
             }
             if (!pendingFootprint.ready()) return;
-            retainFootprint(pendingFootprint);
-            pendingFootprint = null;
+            List<LoadedChunkKey> acquired = retainFootprint(pendingFootprint);
+            try {
+                Block chestBlock = world.getBlockAt(placement.x(), placement.y(), placement.z());
+                if (!canRestore(world, chestBlock, placement)) {
+                    fail("Generated chest ownership conflict at " + placement.x() + ", " + placement.y() + ", "
+                            + placement.z() + "; the replacement block was left untouched.");
+                    return;
+                }
+            } finally {
+                releaseRetained(acquired, false);
+                pendingFootprint = null;
+            }
             oldLoadIndex++;
+            processed++;
         }
         if (oldLoadIndex < oldPlacements.size()) return;
         index = 0;
-        stage = Stage.PRECHECK_OLD;
+        stage = action == GeneratedChestService.ActionType.GENERATE ? Stage.VERIFY_NEW : Stage.REMOVE_OLD;
     }
 
     private void precheckOld(int budget) {
@@ -219,13 +240,26 @@ final class StreamedGeneratedChestOperation {
     }
 
     private void verifyNew(int budget) {
-        for (int processed = 0; processed < budget && index < newSites.size(); processed++, index++) {
+        int processed = 0;
+        while (processed < budget && index < newSites.size()) {
             ChestSite expected = newSites.get(index);
-            if (!validator.validate(generationWorld, region, expected.x(), expected.z()).equals(
-                    java.util.Optional.of(expected))) {
-                fail("A planned outdoor chest site changed before placement. No blocks were changed.");
-                return;
+            if (pendingFootprint == null) {
+                pendingFootprint = beginFootprint(generationWorld, expected.x(), expected.z());
             }
+            if (!pendingFootprint.ready()) return;
+            List<LoadedChunkKey> acquired = retainFootprint(pendingFootprint);
+            try {
+                if (!validator.validate(generationWorld, region, expected.x(), expected.z()).equals(
+                        java.util.Optional.of(expected))) {
+                    fail("A planned outdoor chest site changed before placement. No blocks were changed.");
+                    return;
+                }
+            } finally {
+                releaseRetained(acquired, false);
+                pendingFootprint = null;
+            }
+            index++;
+            processed++;
         }
         if (index < newSites.size()) return;
         index = 0;
@@ -233,9 +267,27 @@ final class StreamedGeneratedChestOperation {
     }
 
     private void removeOld(int budget) {
-        mutationStarted = true;
-        for (int processed = 0; processed < budget && index < oldPlacements.size(); processed++, index++) {
-            restore(oldPlacements.get(index));
+        int processed = 0;
+        while (processed < budget && index < oldPlacements.size()) {
+            GeneratedChestPlacement placement = oldPlacements.get(index);
+            World world = Objects.requireNonNull(worldLookup.apply(placement.world()),
+                    "Generated chest world unloaded");
+            if (pendingFootprint == null) {
+                pendingFootprint = beginFootprint(world, placement.x(), placement.z());
+            }
+            if (!pendingFootprint.ready()) return;
+            List<LoadedChunkKey> acquired = retainFootprint(pendingFootprint);
+            boolean mutated = false;
+            try {
+                mutationStarted = true;
+                mutated = true;
+                restore(placement);
+            } finally {
+                releaseRetained(acquired, mutated);
+                pendingFootprint = null;
+            }
+            index++;
+            processed++;
         }
         if (index < oldPlacements.size()) return;
         index = 0;
@@ -248,16 +300,29 @@ final class StreamedGeneratedChestOperation {
     }
 
     private void prepareNew(int budget) {
-        for (int processed = 0; processed < budget && index < newSites.size(); processed++, index++) {
+        int processed = 0;
+        while (processed < budget && index < newSites.size()) {
             ChestSite site = newSites.get(index);
-            if (!siteStillValid(site)) {
-                fail("A planned outdoor chest site changed before it could be journaled. "
-                        + "The previous generated layout was restored safely.");
-                return;
+            if (pendingFootprint == null) {
+                pendingFootprint = beginFootprint(generationWorld, site.x(), site.z());
             }
-            List<String> originals = captureGround(site);
-            newPlacements.add(new GeneratedChestPlacement(UUID.randomUUID(), generationWorld.getName(),
-                    site.x(), site.chestY(), site.z(), originals, GeneratedChestPlacement.State.PENDING));
+            if (!pendingFootprint.ready()) return;
+            List<LoadedChunkKey> acquired = retainFootprint(pendingFootprint);
+            try {
+                if (!siteStillValid(site)) {
+                    fail("A planned outdoor chest site changed before it could be journaled. "
+                            + "The previous generated layout was restored safely.");
+                    return;
+                }
+                List<String> originals = captureGround(site);
+                newPlacements.add(new GeneratedChestPlacement(UUID.randomUUID(), generationWorld.getName(),
+                        site.x(), site.chestY(), site.z(), originals, GeneratedChestPlacement.State.PENDING));
+            } finally {
+                releaseRetained(acquired, false);
+                pendingFootprint = null;
+            }
+            index++;
+            processed++;
         }
         if (index < newSites.size()) return;
         index = 0;
@@ -270,16 +335,31 @@ final class StreamedGeneratedChestOperation {
     }
 
     private void placeNew(int budget) {
-        mutationStarted = true;
-        for (int processed = 0; processed < budget && index < newPlacements.size(); processed++, index++) {
+        int processed = 0;
+        while (processed < budget && index < newPlacements.size()) {
             GeneratedChestPlacement placement = newPlacements.get(index);
             ChestSite site = new ChestSite(placement.x(), placement.y() - 1, placement.z());
-            if (!siteStillValid(site) || !groundMatches(placement)) {
-                fail("A planned outdoor chest site changed immediately before placement. "
-                        + "The pending registry was kept so Remove Generated can recover safely.");
-                return;
+            if (pendingFootprint == null) {
+                pendingFootprint = beginFootprint(generationWorld, placement.x(), placement.z());
             }
-            place(placement);
+            if (!pendingFootprint.ready()) return;
+            List<LoadedChunkKey> acquired = retainFootprint(pendingFootprint);
+            boolean mutated = false;
+            try {
+                if (!siteStillValid(site) || !groundMatches(placement)) {
+                    fail("A planned outdoor chest site changed immediately before placement. "
+                            + "The pending registry was kept so Remove Generated can recover safely.");
+                    return;
+                }
+                mutationStarted = true;
+                mutated = true;
+                place(placement);
+            } finally {
+                releaseRetained(acquired, mutated);
+                pendingFootprint = null;
+            }
+            index++;
+            processed++;
         }
         if (index >= newPlacements.size()) stage = Stage.PERSIST_ACTIVE;
     }
@@ -459,13 +539,15 @@ final class StreamedGeneratedChestOperation {
         return acquired;
     }
 
-    private void releaseRetained(List<LoadedChunkKey> keys) {
+    private void releaseRetained(List<LoadedChunkKey> keys, boolean save) {
         for (LoadedChunkKey key : keys) {
-            RetainedChunk retained = retainedChunks.get(key);
+            RetainedChunk retained = retainedChunks.remove(key);
             if (retained == null) continue;
-            if (retained.ticketAdded()) retained.chunk().removePluginChunkTicket(plugin);
-            if (retained.loadedByOperation()) retained.chunk().unload(false);
-            retainedChunks.remove(key);
+            try {
+                if (retained.ticketAdded()) retained.chunk().removePluginChunkTicket(plugin);
+            } finally {
+                if (retained.loadedByOperation()) retained.chunk().unload(save);
+            }
         }
     }
 
@@ -507,7 +589,7 @@ final class StreamedGeneratedChestOperation {
             }
             if (chunk.loadedByOperation()) {
                 try {
-                    chunk.chunk().unload(true);
+                    chunk.chunk().unload(mutationStarted);
                 } catch (RuntimeException exception) {
                     cleanupErrors.add("Could not unload a temporary generated chest chunk: "
                             + readable(exception));

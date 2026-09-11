@@ -43,4 +43,20 @@ class ReloadTest {
 
         verify(plugin).reloadConfig();
     }
+
+    @Test
+    void refreshesRuntimeComponentsAfterReloadingConfiguration() {
+        InfectedPlugin plugin = mock(InfectedPlugin.class);
+        GameManager gameManager = mock(GameManager.class);
+        CommandSender sender = mock(CommandSender.class);
+        Runnable runtimeRefresh = mock(Runnable.class);
+        when(gameManager.getPhase()).thenReturn(RoundPhase.LOBBY);
+        when(plugin.getConfig()).thenReturn(new YamlConfiguration());
+
+        new Reload(plugin, gameManager, runtimeRefresh).onCommand(
+                sender, mock(Command.class), "reloadinfected", new String[0]);
+
+        verify(plugin).reloadConfig();
+        verify(runtimeRefresh).run();
+    }
 }

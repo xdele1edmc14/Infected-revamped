@@ -3,6 +3,7 @@ package me.DaWHeL.infected.Handlers;
 import me.DaWHeL.infected.GameManager;
 import me.DaWHeL.infected.DamageAttackerResolver;
 import me.DaWHeL.infected.ParticipantRole;
+import me.DaWHeL.infected.RoundPhase;
 import me.DaWHeL.infected.localization.DeathTitleMessages;
 import org.bukkit.entity.Player;
 import org.bukkit.event.entity.EntityDamageEvent;
@@ -23,6 +24,7 @@ class InfectedDeathListenerTest {
         PlayerDeathEvent event = mock(PlayerDeathEvent.class);
         when(event.getEntity()).thenReturn(player);
         when(gameManager.roleOf(player)).thenReturn(ParticipantRole.INFECTED);
+        when(gameManager.getPhase()).thenReturn(RoundPhase.ACTIVE);
 
         when(gameManager.handleInfectedDeath(player)).thenReturn(true);
 
@@ -40,6 +42,7 @@ class InfectedDeathListenerTest {
         PlayerDeathEvent event = mock(PlayerDeathEvent.class);
         when(event.getEntity()).thenReturn(player);
         when(gameManager.roleOf(player)).thenReturn(ParticipantRole.SURVIVOR);
+        when(gameManager.getPhase()).thenReturn(RoundPhase.ACTIVE);
 
         new InfectedDeathListener(gameManager, messages()).onPlayerDeath(event);
 
@@ -53,11 +56,32 @@ class InfectedDeathListenerTest {
         PlayerDeathEvent event = mock(PlayerDeathEvent.class);
         when(event.getEntity()).thenReturn(player);
         when(gameManager.roleOf(player)).thenReturn(ParticipantRole.INFECTED);
+        when(gameManager.getPhase()).thenReturn(RoundPhase.ACTIVE);
         when(gameManager.handleInfectedDeath(player)).thenReturn(false);
 
         new InfectedDeathListener(gameManager, messages()).onPlayerDeath(event);
 
         verify(player).sendTitle("§c§lYOU DIED", "§4Your lives have run out!", 10, 60, 20);
+    }
+
+    @Test
+    void finalTeamEliminationDoesNotOverwriteTheVictoryTitle() {
+        GameManager gameManager = mock(GameManager.class);
+        Player player = mock(Player.class);
+        PlayerDeathEvent event = mock(PlayerDeathEvent.class);
+        when(event.getEntity()).thenReturn(player);
+        when(gameManager.roleOf(player)).thenReturn(ParticipantRole.INFECTED);
+        when(gameManager.getPhase()).thenReturn(RoundPhase.ACTIVE, RoundPhase.ENDING);
+        when(gameManager.handleInfectedDeath(player)).thenReturn(false);
+
+        new InfectedDeathListener(gameManager, messages()).onPlayerDeath(event);
+
+        verify(player, never()).sendTitle(
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyInt(),
+                org.mockito.ArgumentMatchers.anyInt(),
+                org.mockito.ArgumentMatchers.anyInt());
     }
 
     @Test
@@ -71,11 +95,51 @@ class InfectedDeathListenerTest {
         when(event.getEntity()).thenReturn(deadInfected);
         when(deadInfected.getLastDamageCause()).thenReturn(damage);
         when(gameManager.roleOf(deadInfected)).thenReturn(ParticipantRole.INFECTED);
+        when(gameManager.getPhase()).thenReturn(RoundPhase.ACTIVE);
         when(resolver.resolve(damage)).thenReturn(java.util.Optional.of(survivor));
 
         new InfectedDeathListener(gameManager, messages(), resolver).onPlayerDeath(event);
 
         verify(gameManager).recordSurvivorKill(survivor);
+    }
+
+    @Test
+    void ignoresInfectedDeathsOutsideActivePlay() {
+        GameManager gameManager = mock(GameManager.class);
+        Player player = mock(Player.class);
+        PlayerDeathEvent event = mock(PlayerDeathEvent.class);
+        when(event.getEntity()).thenReturn(player);
+        when(gameManager.getPhase()).thenReturn(RoundPhase.HEADSTART);
+        when(gameManager.roleOf(player)).thenReturn(ParticipantRole.INFECTED);
+
+        new InfectedDeathListener(gameManager, messages()).onPlayerDeath(event);
+
+        verify(gameManager, never()).handleInfectedDeath(player);
+        verify(event, never()).setDroppedExp(org.mockito.ArgumentMatchers.anyInt());
+        verify(player, never()).sendTitle(
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyInt(),
+                org.mockito.ArgumentMatchers.anyInt(),
+                org.mockito.ArgumentMatchers.anyInt());
+    }
+
+    @Test
+    void usesDeathTitleMessagesReloadedAtRuntime() {
+        GameManager gameManager = mock(GameManager.class);
+        Player player = mock(Player.class);
+        PlayerDeathEvent event = mock(PlayerDeathEvent.class);
+        when(event.getEntity()).thenReturn(player);
+        when(gameManager.roleOf(player)).thenReturn(ParticipantRole.INFECTED);
+        when(gameManager.getPhase()).thenReturn(RoundPhase.ACTIVE);
+        when(gameManager.handleInfectedDeath(player)).thenReturn(true);
+        InfectedDeathListener listener = new InfectedDeathListener(gameManager, messages());
+
+        listener.reloadDeathTitles(new DeathTitleMessages(
+                "&aRELOADED", "&bNew respawn text", "&4No lives", 1, 2, 3));
+        listener.onPlayerDeath(event);
+
+        verify(player).sendTitle("§aRELOADED", "§bNew respawn text", 1, 2, 3);
     }
 
     private static DeathTitleMessages messages() {

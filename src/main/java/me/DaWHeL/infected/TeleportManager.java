@@ -14,6 +14,8 @@ import java.util.function.BiConsumer;
 import java.util.function.Predicate;
 
 public class TeleportManager {
+    static final int MAX_PLAYERS_PER_SPAWN = 25;
+    private static final List<SlotOffset> SLOT_OFFSETS = buildSlotOffsets();
     private final SpawnRepository spawnRepository;
     private final PluginTaskScheduler scheduler;
 
@@ -36,7 +38,12 @@ public class TeleportManager {
     }
 
     public boolean addTeleportPoint(Player player, String name) {
+        return addTeleportPoint(player, SpawnRole.SURVIVOR, name);
+    }
+
+    public boolean addTeleportPoint(Player player, SpawnRole role, String name) {
         Objects.requireNonNull(player, "player");
+        Objects.requireNonNull(role, "role");
         if (!isValidPointName(name)) {
             player.sendMessage("Teleport point names cannot be blank or contain periods.");
             return false;
@@ -47,13 +54,18 @@ public class TeleportManager {
             return false;
         }
 
-        spawnRepository.savePoint(SpawnRole.SURVIVOR, name, location);
-        player.sendMessage("Survivor spawn " + name + " added!");
+        spawnRepository.savePoint(role, name, location);
+        player.sendMessage(role.displayName() + " spawn " + name + " added!");
         return true;
     }
 
     public boolean removeTeleportPoint(String name) {
-        return isValidPointName(name) && spawnRepository.deletePoint(SpawnRole.SURVIVOR, name);
+        return removeTeleportPoint(SpawnRole.SURVIVOR, name);
+    }
+
+    public boolean removeTeleportPoint(SpawnRole role, String name) {
+        Objects.requireNonNull(role, "role");
+        return isValidPointName(name) && spawnRepository.deletePoint(role, name);
     }
 
     public List<Location> getTeleportPoints() {
@@ -184,6 +196,17 @@ public class TeleportManager {
             completion.accept(new TeleportBatchResult(0, 0, List.of(), null));
             return null;
         }
+        long capacity = (long) platforms.size() * MAX_PLAYERS_PER_SPAWN;
+        if (queue.size() > capacity) {
+            completion.accept(new TeleportBatchResult(
+                    0,
+                    0,
+                    List.of(),
+                    "The " + role.displayName().toLowerCase(Locale.ROOT) + " spawn capacity is "
+                            + capacity + " players, but " + queue.size() + " need a destination."
+            ));
+            return null;
+        }
 
         int[] index = {0};
         int[] attempted = {0};
@@ -233,16 +256,36 @@ public class TeleportManager {
     }
 
     static Location slotDestination(Location center, int slotIndex) {
-        int half = 2;
-        int row = slotIndex / 5;
-        int column = slotIndex % 5;
+        Objects.requireNonNull(center, "center");
+        if (slotIndex < 0 || slotIndex >= SLOT_OFFSETS.size()) {
+            throw new IllegalArgumentException(
+                    "Spawn slots must be between 0 and " + (MAX_PLAYERS_PER_SPAWN - 1) + ".");
+        }
+        SlotOffset offset = SLOT_OFFSETS.get(slotIndex);
         Location destination = center.clone();
-        destination.setX(center.getX() - half + column + 0.5);
-        destination.setZ(center.getZ() - half + row + 0.5);
+        destination.add(offset.x, 0, offset.z);
         return destination;
+    }
+
+    private static List<SlotOffset> buildSlotOffsets() {
+        List<SlotOffset> offsets = new ArrayList<>(MAX_PLAYERS_PER_SPAWN);
+        offsets.add(new SlotOffset(0, 0));
+        for (int radius = 1; radius <= 2; radius++) {
+            for (int z = -radius; z <= radius; z++) {
+                for (int x = -radius; x <= radius; x++) {
+                    if (Math.max(Math.abs(x), Math.abs(z)) == radius) {
+                        offsets.add(new SlotOffset(x, z));
+                    }
+                }
+            }
+        }
+        return List.copyOf(offsets);
     }
 
     private static boolean isValidPointName(String name) {
         return name != null && !name.isBlank() && !name.contains(".");
+    }
+
+    private record SlotOffset(int x, int z) {
     }
 }

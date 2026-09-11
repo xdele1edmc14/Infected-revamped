@@ -1,8 +1,28 @@
 # Infected Plugin Configuration
 
 settings:
-  starting-zombies: 5            # Number of zombies to infect at the start of the game
-  infected-lives: 3              # Deaths an infected player can take before becoming a spectator
+  # Admins can switch this from the Infected GUI while the event is in the lobby.
+  default-round-mode: deathmatch
+  modes:
+    time-limit:
+      starting-zombies: 2        # Initial zombies used only for Time Limit rounds
+      time-limit-seconds: 600     # Active-play time; survivors win when this reaches zero
+      # Time Limit zombies always have exactly one life.
+      boss-bar:
+        enabled: true
+        title: "&eTime Remaining: &f{time}"
+        color: YELLOW             # PINK, BLUE, RED, GREEN, YELLOW, PURPLE, or WHITE
+        style: SOLID              # SOLID, SEGMENTED_6, SEGMENTED_10, SEGMENTED_12, or SEGMENTED_20
+      tracking-compass:
+        enabled: true
+        give-below-minutes: 5     # Zombies receive compasses only below this remaining time
+    deathmatch:
+      starting-zombies: 5        # Initial zombies used only for Deathmatch rounds
+      infected-lives: 3          # Deaths each zombie can take before becoming a spectator
+      tracking-compass:
+        enabled: true
+        remove-below-zombies: 10 # Compasses return if the zombie count climbs back to this number
+
   infected-teleport-delay: 10    # Seconds after all the survivals finished teleporting, to start teleporting the infected players
 
   teleport-batch-size: 10        # Players teleported per teleport-delay to avoid lag
@@ -21,6 +41,8 @@ scoreboard:
       - ""
       - "<gray>Role: <aqua>{role}"
       - "<gray>Kills: <white>{kills}"
+      - "<gray>Mode: <white>{round_mode}"
+      - "<gray>Time: <white>{time_remaining}"
       - ""
       - "<aqua>Survivors: <white>{survivors}"
       - "<red>Infected: <white>{infected}"
@@ -32,6 +54,8 @@ scoreboard:
       - "<gray>Role: <red>{role}"
       - "<gray>Infections: <white>{infections}"
       - "<gray>Lives: {lives_hearts} <white>{lives}/{max_lives}"
+      - "<gray>Mode: <white>{round_mode}"
+      - "<gray>Time: <white>{time_remaining}"
       - ""
       - "<aqua>Survivors: <white>{survivors}"
       - "<red>Infected: <white>{infected}"
@@ -41,6 +65,8 @@ scoreboard:
     spectator:
       - ""
       - "<gray>Role: <white>{role}"
+      - "<gray>Mode: <white>{round_mode}"
+      - "<gray>Time: <white>{time_remaining}"
       - ""
       - "<aqua>Survivors: <white>{survivors}"
       - "<red>Infected: <white>{infected}"
@@ -91,7 +117,6 @@ messages:
     pitch: 0.5
   game-start: "&eThe Infected game has started with &c{zombies} &ezombies!"
   game-stop: "The Infected game has been stopped!"
-  survivors-teleporting: "&bSurvivors are being teleported..."
   zombies-teleporting: "&cInfected zombies will be teleported in &e{time} &cseconds..."
   infected: "&c{player} has been infected!"
   all-infected:
@@ -102,12 +127,17 @@ messages:
     chat: "&2All infected have been eliminated! Survivors win!"
     title: "&2Survivors Win!"
     subtitle: "&7All infected have been eliminated!"
-  all-survivals: "&4All zombies left the game! Restarting..."
-  already-running: "&cThe game is already running!"
+  time-limit-survived:
+    chat: "&2The time limit expired with survivors remaining! Survivors win!"
+    title: "&2Survivors Win!"
+    subtitle: "&7The survivors outlasted the time limit!"
   config-reloaded: "&aInfected plugin configuration reloaded!"
   round-abandoned: "&eThe Infected round was abandoned because a team left the event."
-  unsafe-infected-respawn: "&cNo safe dedicated infected respawn is available. The round has been cancelled."
+  infected-respawn-unavailable: "&cNo infected respawn is available. The round has been cancelled."
   infected-admission-teleport-failed: "&cThe infected player could not be teleported safely. The round has been cancelled."
+  tracking-compass:
+    enabled: "&eZombie tracking compasses are now &aenabled&e."
+    disabled: "&eZombie tracking compasses are now &cdisabled&e."
 
 infected-spawn:
 

@@ -3,6 +3,8 @@ package me.DaWHeL.infected.gui;
 import me.DaWHeL.infected.GameManager;
 import me.DaWHeL.infected.RoundPhase;
 import me.DaWHeL.infected.SpawnRole;
+import me.DaWHeL.infected.RoundActionResult;
+import me.DaWHeL.infected.TrackingCompassOverride;
 import org.bukkit.ChatColor;
 import org.bukkit.Location;
 import org.bukkit.command.Command;
@@ -59,7 +61,8 @@ class InfectedAdminCommandTest {
         when(gameManager.getPhase()).thenReturn(RoundPhase.HEADSTART);
         when(gameManager.getSurvivors()).thenReturn(List.of());
         when(gameManager.getInfected()).thenReturn(List.of());
-        when(setupService.snapshot(0, 0)).thenReturn(
+        when(gameManager.configuredStartingInfected()).thenReturn(2);
+        when(setupService.snapshot(0, 0, 2)).thenReturn(
                 new AdminSetupService.SetupSnapshot(true, 2, 2, 2, 6, 0, 2, 10, 5, 20));
 
         assertTrue(command.onCommand(console, bukkitCommand, "infected", new String[0]));
@@ -74,6 +77,8 @@ class InfectedAdminCommandTest {
                 () -> assertTrue(combined.contains("Setup: Ready")),
                 () -> assertTrue(combined.contains("/infected"))
         );
+        verify(setupService).snapshot(0, 0, 2);
+        verify(setupService, never()).snapshot(0, 0);
     }
 
     @Test
@@ -140,6 +145,46 @@ class InfectedAdminCommandTest {
                         command.onTabComplete(player, bukkitCommand, "infected",
                                 new String[]{"gui", "addteleport", "release", ""}))
         );
+    }
+
+    @Test
+    void adminCanForceTrackingCompassesOnAndReturnToAutomaticMode() {
+        Player player = authorizedPlayer();
+        when(gameManager.setTrackingCompassOverride(TrackingCompassOverride.ON))
+                .thenReturn(RoundActionResult.accepted("Tracking compasses forced on."));
+        when(gameManager.setTrackingCompassOverride(TrackingCompassOverride.AUTO))
+                .thenReturn(RoundActionResult.accepted("Tracking compasses returned to automatic mode."));
+
+        assertTrue(command.onCommand(player, bukkitCommand, "infected", new String[]{"compass", "on"}));
+        assertTrue(command.onCommand(player, bukkitCommand, "infected", new String[]{"compass", "auto"}));
+
+        verify(gameManager).setTrackingCompassOverride(TrackingCompassOverride.ON);
+        verify(gameManager).setTrackingCompassOverride(TrackingCompassOverride.AUTO);
+    }
+
+    @Test
+    void consoleCanControlTrackingCompassesAndInspectStatus() {
+        CommandSender console = mock(CommandSender.class);
+        when(gameManager.setTrackingCompassOverride(TrackingCompassOverride.OFF))
+                .thenReturn(RoundActionResult.accepted("Tracking compasses forced off."));
+        when(gameManager.trackingCompassOverride()).thenReturn(TrackingCompassOverride.OFF);
+
+        assertTrue(command.onCommand(console, bukkitCommand, "infected", new String[]{"compass", "off"}));
+        assertTrue(command.onCommand(console, bukkitCommand, "infected", new String[]{"compass", "status"}));
+
+        verify(gameManager).setTrackingCompassOverride(TrackingCompassOverride.OFF);
+        verify(console, atLeastOnce()).sendMessage(contains("forced off"));
+        verify(console, atLeastOnce()).sendMessage(contains("Tracking compasses"));
+    }
+
+    @Test
+    void compassSubcommandsAreTabCompleted() {
+        Player player = authorizedPlayer();
+
+        assertEquals(List.of("compass"),
+                command.onTabComplete(player, bukkitCommand, "infected", new String[]{"c"}));
+        assertEquals(List.of("on", "off"),
+                command.onTabComplete(player, bukkitCommand, "infected", new String[]{"compass", "o"}));
     }
 
     private static Player authorizedPlayer() {

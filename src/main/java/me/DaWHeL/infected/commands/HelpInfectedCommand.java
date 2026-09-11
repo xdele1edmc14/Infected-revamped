@@ -13,6 +13,8 @@ public class HelpInfectedCommand implements CommandExecutor {
         sender.sendMessage(ChatColor.YELLOW + "/startinfected" + ChatColor.GRAY + " - Starts the Infected game");
         sender.sendMessage(ChatColor.YELLOW + "/stopinfected" + ChatColor.GRAY + " - Stops the Infected game");
         sender.sendMessage(ChatColor.YELLOW + "/buffinfected" + ChatColor.GRAY + " - Gives all infected players a buff");
+        sender.sendMessage(ChatColor.YELLOW + "/infected compass <on|off|auto|status>" + ChatColor.GRAY
+                + " - Controls zombie tracking compasses during active play");
         sender.sendMessage(ChatColor.YELLOW + "/listplayers" + ChatColor.GRAY + " - Shows all survivors and infected");
         sender.sendMessage(ChatColor.YELLOW + "/reloadinfected" + ChatColor.GRAY + " - Reloads config in the lobby");
         sender.sendMessage(ChatColor.YELLOW + "/addteleport <pointName>" + ChatColor.GRAY + " - Adds a new teleport point");

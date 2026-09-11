@@ -1,20 +1,24 @@
 package me.DaWHeL.infected.commands;
 
-import org.bukkit.Bukkit;
+import me.DaWHeL.infected.InfectedPlugin;
+import me.DaWHeL.infected.SpawnRepository;
+import me.DaWHeL.infected.SpawnRole;
 import org.bukkit.ChatColor;
 import org.bukkit.Location;
-import org.bukkit.World;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
-import org.bukkit.plugin.java.JavaPlugin;
 
 public class TeleportToTeleportPoint implements CommandExecutor {
-    private final JavaPlugin plugin;
+    private final SpawnRepository repository;
 
-    public TeleportToTeleportPoint(JavaPlugin plugin) {
-        this.plugin = plugin;
+    public TeleportToTeleportPoint(InfectedPlugin plugin) {
+        this(new SpawnRepository(plugin));
+    }
+
+    TeleportToTeleportPoint(SpawnRepository repository) {
+        this.repository = repository;
     }
 
     @Override
@@ -26,33 +30,32 @@ public class TeleportToTeleportPoint implements CommandExecutor {
 
         Player player = (Player) sender;
 
-        if (args.length < 1) {
-            player.sendMessage(ChatColor.RED + "Usage: /tttp <name>");
+        if (args.length < 1 || args.length > 2) {
+            player.sendMessage(ChatColor.RED + "Usage: /tttp [survivor|release|respawn] <name>");
             return true;
         }
 
-        String pointName = args[0];
-        String basePath = "teleports." + pointName;
+        SpawnRole role = args.length == 1 ? SpawnRole.SURVIVOR
+                : SpawnRole.fromCommandKey(args[0]).orElse(null);
+        if (role == null) {
+            player.sendMessage(ChatColor.RED + "Unknown spawn role. Use survivor, release, or respawn.");
+            return true;
+        }
+        String pointName = args[args.length - 1];
 
-        if (!plugin.getConfig().contains(basePath)) {
-            player.sendMessage(ChatColor.RED + "Teleport point '" + pointName + "' does not exist!");
+        Location destination = repository.loadedPoint(role, pointName).orElse(null);
+        if (destination == null) {
+            player.sendMessage(ChatColor.RED + role.displayName() + " spawn '" + pointName
+                    + "' is missing, malformed, or in an unloaded world.");
             return true;
         }
 
-        String worldName = plugin.getConfig().getString(basePath + ".world");
-        double x = plugin.getConfig().getDouble(basePath + ".x");
-        double y = plugin.getConfig().getDouble(basePath + ".y");
-        double z = plugin.getConfig().getDouble(basePath + ".z");
-
-        World world = Bukkit.getWorld(worldName);
-        if (world == null) {
-            player.sendMessage(ChatColor.RED + "World '" + worldName + "' is not loaded!");
-            return true;
+        if (player.teleport(destination)) {
+            player.sendMessage(ChatColor.GREEN + "Teleported to " + role.displayName() + " spawn "
+                    + pointName + "!");
+        } else {
+            player.sendMessage(ChatColor.RED + "Teleport was cancelled.");
         }
-
-        Location loc = new Location(world, x + 0.5, y + 1, z + 0.5);
-        player.teleport(loc);
-        player.sendMessage(ChatColor.GREEN + "Teleported to " + pointName + "!");
         return true;
     }
 }

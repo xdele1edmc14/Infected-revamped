@@ -10,6 +10,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -75,12 +76,9 @@ class AdminSetupServiceTest {
 
     @Test
     void listsTeleportPointsInStableCaseInsensitiveOrder() {
-        config.set("spawns.survivor.zulu.world", "arena");
-        config.set("spawns.survivor.zulu.x", 3);
-        config.set("spawns.survivor.Alpha.world", "arena");
-        config.set("spawns.survivor.Alpha.x", 1);
-        config.set("spawns.survivor.bravo.world", "arena");
-        config.set("spawns.survivor.bravo.x", 2);
+        setStored("spawns.survivor.zulu", 3);
+        setStored("spawns.survivor.Alpha", 1);
+        setStored("spawns.survivor.bravo", 2);
 
         List<String> names = service.teleportPoints().stream()
                 .map(AdminSetupService.TeleportPoint::name)
@@ -91,16 +89,19 @@ class AdminSetupServiceTest {
 
     @Test
     void reportsReadinessAndExistingSettings() {
-        config.set("infected-spawn.world", "arena");
-        config.set("spawns.survivor.mid.world", "arena");
-        config.set("spawns.infected-release.mid.world", "arena");
-        config.set("spawns.infected-respawn.mid.world", "arena");
+        SpawnRepository repository = mock(SpawnRepository.class);
+        SpawnRepository.StoredSpawn stored = storedSpawn();
+        when(repository.holdingSpawn()).thenReturn(Optional.of(stored));
+        for (SpawnRole role : SpawnRole.values()) {
+            when(repository.points(role)).thenReturn(List.of(
+                    new SpawnRepository.NamedSpawn("one", stored)));
+        }
         config.set("settings.starting-zombies", 4);
         config.set("settings.infected-teleport-delay", 12);
         config.set("settings.teleport-batch-size", 6);
         config.set("settings.teleport-delay", 40);
 
-        AdminSetupService.SetupSnapshot snapshot = service.snapshot(8, 2);
+        AdminSetupService.SetupSnapshot snapshot = new AdminSetupService(plugin, repository).snapshot(8, 2);
 
         assertAll(
                 () -> assertTrue(snapshot.ready()),
@@ -118,15 +119,106 @@ class AdminSetupServiceTest {
     }
 
     @Test
-    void readinessRequiresEverySpawnRoleAndValidPlayerCounts() {
+    void guiSnapshotUsesTheStartingCountFromTheSelectedRoundMode() {
+        SpawnRepository repository = mock(SpawnRepository.class);
+        SpawnRepository.StoredSpawn stored = storedSpawn();
+        when(repository.holdingSpawn()).thenReturn(Optional.of(stored));
+        for (SpawnRole role : SpawnRole.values()) {
+            when(repository.points(role)).thenReturn(List.of(
+                    new SpawnRepository.NamedSpawn("one", stored)));
+        }
+        config.set("settings.starting-zombies", 1);
+        config.set("settings.teleport-batch-size", 6);
+        config.set("settings.teleport-delay", 40);
+        config.set("settings.infected-teleport-delay", 12);
+
+        AdminSetupService.SetupSnapshot snapshot =
+                new AdminSetupService(plugin, repository).snapshot(4, 0, 3);
+
+        assertEquals(3, snapshot.startingInfected());
+        assertTrue(snapshot.ready());
+    }
+
+    @Test
+    void reportsConfiguredSpawnCountsEvenWhenTheirChunksAreUnloaded() {
+        SpawnRepository repository = mock(SpawnRepository.class);
+        SpawnRepository.StoredSpawn stored = new SpawnRepository.StoredSpawn(
+                "arena", 10.95, 64, 10.05, 0, 0);
+        when(repository.holdingSpawn()).thenReturn(Optional.of(stored));
+        when(repository.points(SpawnRole.SURVIVOR)).thenReturn(List.of(
+                new SpawnRepository.NamedSpawn("one", stored),
+                new SpawnRepository.NamedSpawn("two", stored)));
+        when(repository.points(SpawnRole.INFECTED_RELEASE)).thenReturn(List.of(
+                new SpawnRepository.NamedSpawn("release", stored)));
+        when(repository.points(SpawnRole.INFECTED_RESPAWN)).thenReturn(List.of(
+                new SpawnRepository.NamedSpawn("respawn", stored)));
+        config.set("settings.starting-zombies", 1);
+        config.set("settings.infected-teleport-delay", 10);
+        config.set("settings.teleport-batch-size", 10);
+        config.set("settings.teleport-delay", 5);
+
+        AdminSetupService.SetupSnapshot snapshot = new AdminSetupService(plugin, repository).snapshot(3, 0);
+
+        assertAll(
+                () -> assertTrue(snapshot.infectedSpawnConfigured()),
+                () -> assertEquals(2, snapshot.survivorSpawnCount()),
+                () -> assertEquals(1, snapshot.infectedReleaseSpawnCount()),
+                () -> assertEquals(1, snapshot.infectedRespawnSpawnCount()),
+                () -> assertTrue(snapshot.ready())
+        );
+    }
+
+    @Test
+    void readinessRequiresEveryConfiguredSpawnRole() {
+        SpawnRepository repository = mock(SpawnRepository.class);
+        SpawnRepository.StoredSpawn stored = storedSpawn();
+        when(repository.holdingSpawn()).thenReturn(Optional.of(stored));
+        when(repository.points(SpawnRole.SURVIVOR)).thenReturn(List.of(
+                new SpawnRepository.NamedSpawn("one", stored),
+                new SpawnRepository.NamedSpawn("two", stored)));
+        when(repository.points(SpawnRole.INFECTED_RELEASE)).thenReturn(List.of(
+                new SpawnRepository.NamedSpawn("release", stored)));
+        when(repository.points(SpawnRole.INFECTED_RESPAWN)).thenReturn(List.of());
+        config.set("settings.starting-zombies", 1);
+        config.set("settings.infected-teleport-delay", 10);
+        config.set("settings.teleport-batch-size", 10);
+        config.set("settings.teleport-delay", 5);
+        AdminSetupService checked = new AdminSetupService(plugin, repository);
+
+        AdminSetupService.SetupSnapshot snapshot = checked.snapshot(3, 0);
+
+        assertAll(
+                () -> assertTrue(snapshot.infectedSpawnConfigured()),
+                () -> assertEquals(2, snapshot.survivorSpawnCount()),
+                () -> assertEquals(1, snapshot.infectedReleaseSpawnCount()),
+                () -> assertEquals(0, snapshot.infectedRespawnSpawnCount()),
+                () -> assertFalse(snapshot.ready())
+        );
+    }
+
+    @Test
+    void malformedHoldingSpawnIsRejectedByTheSharedRepositoryParser() {
         config.set("infected-spawn.world", "arena");
-        config.set("spawns.survivor.mid.world", "arena");
+        config.set("infected-spawn.x", 2);
+
+        assertTrue(service.infectedSpawn().isEmpty());
+    }
+
+    @Test
+    void readinessRequiresEverySpawnRoleAndValidPlayerCounts() {
+        SpawnRepository repository = mock(SpawnRepository.class);
+        SpawnRepository.StoredSpawn stored = storedSpawn();
+        when(repository.holdingSpawn()).thenReturn(Optional.of(stored));
+        when(repository.points(SpawnRole.SURVIVOR)).thenReturn(List.of(
+                new SpawnRepository.NamedSpawn("one", stored)));
+        when(repository.points(SpawnRole.INFECTED_RELEASE)).thenReturn(List.of());
+        when(repository.points(SpawnRole.INFECTED_RESPAWN)).thenReturn(List.of());
         config.set("settings.starting-zombies", 2);
         config.set("settings.teleport-batch-size", 5);
         config.set("settings.teleport-delay", 40);
         config.set("settings.infected-teleport-delay", 10);
 
-        AdminSetupService.SetupSnapshot snapshot = service.snapshot(2, 0);
+        AdminSetupService.SetupSnapshot snapshot = new AdminSetupService(plugin, repository).snapshot(2, 0);
 
         assertAll(
                 () -> assertFalse(snapshot.ready()),
@@ -156,5 +248,18 @@ class AdminSetupServiceTest {
         World world = mock(World.class);
         when(world.getName()).thenReturn(worldName);
         return new Location(world, x, y, z, yaw, pitch);
+    }
+
+    private static SpawnRepository.StoredSpawn storedSpawn() {
+        return new SpawnRepository.StoredSpawn("arena", 10.5, 64, 10.5, 0, 0);
+    }
+
+    private void setStored(String path, double x) {
+        config.set(path + ".world", "arena");
+        config.set(path + ".x", x);
+        config.set(path + ".y", 64);
+        config.set(path + ".z", 0);
+        config.set(path + ".yaw", 0);
+        config.set(path + ".pitch", 0);
     }
 }

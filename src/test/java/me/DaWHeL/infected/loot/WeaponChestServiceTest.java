@@ -208,6 +208,55 @@ class WeaponChestServiceTest {
     }
 
     @Test
+    void shutdownCancelsTheScheduledOperationRollsBackMutationAndReleasesTheLease() {
+        GameManager game = mock(GameManager.class);
+        when(game.getPhase()).thenReturn(RoundPhase.LOBBY);
+        WeaponLootCatalog catalog = new WeaponLootCatalog(
+                new BlockPoint("arena", 0, 0, 0), new BlockPoint("arena", 15, 255, 15),
+                new WeaponLootCatalog.Settings(10, 25, 5_000), List.of(), List.of(), List.of());
+        Plugin plugin = mock(Plugin.class);
+        Server server = mock(Server.class);
+        BukkitScheduler scheduler = mock(BukkitScheduler.class);
+        BukkitTask task = mock(BukkitTask.class);
+        when(plugin.getServer()).thenReturn(server);
+        when(server.getScheduler()).thenReturn(scheduler);
+        when(scheduler.runTaskTimer(eq(plugin), any(Runnable.class), eq(1L), eq(1L))).thenReturn(task);
+        World world = mock(World.class);
+        Chunk chunk = mock(Chunk.class);
+        List<Inventory> inventories = java.util.stream.IntStream.range(0, 65)
+                .mapToObj(ignored -> mock(Inventory.class))
+                .toList();
+        Inventory first = inventories.getFirst();
+        ItemStack original = item();
+        when(first.getContents()).thenReturn(new ItemStack[]{original});
+        when(world.isChunkLoaded(0, 0)).thenReturn(true);
+        when(world.getChunkAt(0, 0)).thenReturn(chunk);
+        ChestDiscoveryService discovery = mock(ChestDiscoveryService.class);
+        when(discovery.world("arena")).thenReturn(world);
+        when(discovery.discover(any(ChestRegion.class), eq(chunk))).thenReturn(
+                java.util.stream.IntStream.range(0, inventories.size())
+                        .mapToObj(index -> new DiscoveredChest(
+                                "chest-" + String.format("%03d", index), inventories.get(index)))
+                        .toList());
+        WeaponChestService service = new WeaponChestService(
+                game, () -> catalog, discovery, mock(ChestLootGenerator.class));
+
+        service.executeAsync(plugin, WeaponChestService.ActionType.CLEAR, ignored -> { });
+        var tick = org.mockito.ArgumentCaptor.forClass(Runnable.class);
+        verify(scheduler).runTaskTimer(eq(plugin), tick.capture(), eq(1L), eq(1L));
+        tick.getValue().run();
+        tick.getValue().run();
+        tick.getValue().run();
+        service.shutdown();
+
+        assertFalse(service.isOperationActive());
+        verify(task).cancel();
+        verify(first).setContents(new ItemStack[]{original});
+        verify(inventories.getLast(), never()).clear();
+        verify(chunk, never()).addPluginChunkTicket(plugin);
+    }
+
+    @Test
     void reportsWhetherAStreamedOperationOwnsTheRoundStartLease() {
         GameManager game = mock(GameManager.class);
         when(game.getPhase()).thenReturn(RoundPhase.LOBBY);

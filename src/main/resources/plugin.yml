@@ -8,7 +8,7 @@ description: An infected minigame created for Outcraft
 commands:
   infected:
     description: Opens the Infected event administration control desk
-    usage: "/infected [gui addteleport [survivor|release|respawn] <name>]"
+    usage: "/infected [gui addteleport [survivor|release|respawn] <name> | compass <on|off|auto|status>]"
     permission: infected.admin
   startinfected:
     description: Start the infected game
@@ -24,26 +24,27 @@ commands:
     description: Reload the infected plugin configuration while in the lobby
     permission: infected.admin
   addteleport:
-    description: Add a teleport point for survivors or zombies
-    usage: /addteleport <pointName>
+    description: Add a role-specific arena spawn point
+    usage: /addteleport [survivor|release|respawn] <pointName>
     permission: infected.admin
   removeteleport:
-    description: Remove a teleport point for survivors or zombies
-    usage: /removeteleport <pointName>
+    description: Remove a role-specific arena spawn point
+    usage: /removeteleport [survivor|release|respawn] <pointName>
     permission: infected.admin
   tttp:
     description: Teleport to a specific teleport point
-    usage: /tttp <pointName>
+    usage: /tttp [survivor|release|respawn] <pointName>
     permission: infected.admin
   removeplayer:
     description: Safely remove a participant or queued spectator from the current round
     usage: /removeplayer <player>
     permission: infected.admin
   listteleportpoints:
-    description: List all teleport points for survivors and zombies
+    description: List role-specific arena spawn points
+    usage: /listteleportpoints [survivor|release|respawn]
     permission: infected.admin
   buffinfected:
-    description: Buffs all infected with Speed and a tracking compass.
+    description: Toggles boosted Speed and Resistance for all infected.
     permission: infected.admin
   listplayers:
     description: Lists all survivors and infected players.
@@ -53,9 +54,9 @@ commands:
     permission: infected.admin
   createinfectedspawn:
     permission: infected.admin
-    description: Sets the infected spawn location
+    description: Sets the infected holding spawn location
   tpinfectedspawn:
-    description: Teleports you to the infected spawn location
+    description: Teleports you to the infected holding spawn location
     permission: infected.admin
 permissions:
   infected.admin:

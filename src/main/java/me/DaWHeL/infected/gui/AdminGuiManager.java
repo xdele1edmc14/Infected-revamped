@@ -5,6 +5,8 @@ import me.DaWHeL.infected.InfectedPlugin;
 import me.DaWHeL.infected.Roles.Infected;
 import me.DaWHeL.infected.Roles.Survivor;
 import me.DaWHeL.infected.RoundPhase;
+import me.DaWHeL.infected.RoundActionResult;
+import me.DaWHeL.infected.RoundMode;
 import me.DaWHeL.infected.SpawnRole;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
@@ -128,6 +130,22 @@ public final class AdminGuiManager implements AdminGuiNavigator, AdminGuiClickHa
                 "",
                 ChatColor.AQUA + "Click: " + ChatColor.GRAY + "Reload"
         ));
+        RoundMode mode = gameManager.activeRoundMode();
+        menu.setItem(AdminGuiLayout.ROUND_MODE, AdminGuiItems.item(
+                mode == RoundMode.TIME_LIMIT ? Material.CLOCK : Material.IRON_SWORD,
+                mode == RoundMode.TIME_LIMIT ? ChatColor.AQUA : ChatColor.RED,
+                "Round Mode",
+                ChatColor.GRAY + "Selected: " + ChatColor.WHITE + mode.displayName(),
+                ChatColor.GRAY + "Starting zombies: " + ChatColor.RED
+                        + gameManager.configuredStartingInfected(),
+                ChatColor.GRAY + "Zombie lives: " + ChatColor.RED
+                        + gameManager.configuredInfectedLives(),
+                ChatColor.GRAY + "Time: " + ChatColor.WHITE + gameManager.roundTimeDisplay(),
+                "",
+                running
+                        ? ChatColor.YELLOW + "Locked until this round ends."
+                        : ChatColor.AQUA + "Click: " + ChatColor.GRAY + "Switch mode"
+        ));
         menu.setItem(AdminGuiLayout.RANDOM_WEAPON_CHESTS, AdminGuiItems.item(
                 Material.CHEST,
                 ChatColor.GOLD,
@@ -167,6 +185,8 @@ public final class AdminGuiManager implements AdminGuiNavigator, AdminGuiClickHa
                 running ? ChatColor.GREEN : ChatColor.YELLOW,
                 "Live Event Status",
                 ChatColor.GRAY + "State: " + ChatColor.YELLOW + phase.name(),
+                ChatColor.GRAY + "Mode: " + ChatColor.WHITE + gameManager.roundModeDisplayName(),
+                ChatColor.GRAY + "Time: " + ChatColor.WHITE + gameManager.roundTimeDisplay(),
                 ChatColor.GRAY + "Setup: " + (snapshot.ready() ? ChatColor.GREEN + "Ready" : ChatColor.RED + "Incomplete")
         ));
         menu.setItem(20, AdminGuiItems.item(Material.LIME_DYE, ChatColor.GREEN, "Survivors",
@@ -443,6 +463,7 @@ public final class AdminGuiManager implements AdminGuiNavigator, AdminGuiClickHa
             case AdminGuiLayout.START_EVENT -> requestStart(player);
             case AdminGuiLayout.STOP_EVENT -> requestStop(player);
             case AdminGuiLayout.RELOAD_CONFIG -> reload(player);
+            case AdminGuiLayout.ROUND_MODE -> cycleRoundMode(player);
             case AdminGuiLayout.RANDOM_WEAPON_CHESTS -> weaponMenuOpener.accept(player);
             case AdminGuiLayout.QUICK_HELP -> openHelp(player);
             case AdminGuiLayout.MAIN_CLOSE -> player.closeInventory();
@@ -651,7 +672,8 @@ public final class AdminGuiManager implements AdminGuiNavigator, AdminGuiClickHa
             openMain(player);
             return;
         }
-        openConfirmation(player, AdminMenuHolder.ConfirmationAction.START, null, null, 0);
+        openConfirmation(player, AdminMenuHolder.ConfirmationAction.START, null,
+                gameManager.roundStartStateKey(), 0);
     }
 
     private void requestStop(Player player) {
@@ -663,7 +685,8 @@ public final class AdminGuiManager implements AdminGuiNavigator, AdminGuiClickHa
             openMain(player);
             return;
         }
-        openConfirmation(player, AdminMenuHolder.ConfirmationAction.STOP, null, null, 0);
+        openConfirmation(player, AdminMenuHolder.ConfirmationAction.STOP, null,
+                Long.toString(gameManager.currentRoundId()), 0);
     }
 
     private void reload(Player player) {
@@ -682,6 +705,12 @@ public final class AdminGuiManager implements AdminGuiNavigator, AdminGuiClickHa
             player.sendMessage(ChatColor.YELLOW + "Weapon loot configuration reloaded with errors:");
             weaponErrors.forEach(error -> player.sendMessage(ChatColor.RED + "- " + error));
         }
+        openMain(player);
+    }
+
+    private void cycleRoundMode(Player player) {
+        RoundActionResult result = gameManager.cycleRoundMode();
+        player.sendMessage((result.success() ? ChatColor.GREEN : ChatColor.YELLOW) + result.message());
         openMain(player);
     }
 
@@ -735,6 +764,13 @@ public final class AdminGuiManager implements AdminGuiNavigator, AdminGuiClickHa
 
         switch (holder.confirmationAction()) {
             case START -> {
+                String currentState = gameManager.roundStartStateKey();
+                if (!AdminGuiPolicy.matchesExpected(holder.expectedState(), currentState)) {
+                    player.sendMessage(ChatColor.YELLOW
+                            + "The round setup changed while confirmation was open. Review it again.");
+                    openMain(player);
+                    return;
+                }
                 AdminEventActions.ActionResult result = eventActions.start(player);
                 player.sendMessage((result.success() ? ChatColor.GREEN : ChatColor.RED) + result.message());
                 if (result.success()) {
@@ -744,6 +780,13 @@ public final class AdminGuiManager implements AdminGuiNavigator, AdminGuiClickHa
                 }
             }
             case STOP -> {
+                String currentRound = Long.toString(gameManager.currentRoundId());
+                if (!AdminGuiPolicy.matchesExpected(holder.expectedState(), currentRound)) {
+                    player.sendMessage(ChatColor.YELLOW
+                            + "That stop confirmation belongs to a different round. Review the current event again.");
+                    openMain(player);
+                    return;
+                }
                 AdminEventActions.ActionResult result = eventActions.stop();
                 player.sendMessage((result.success() ? ChatColor.GREEN : ChatColor.YELLOW) + result.message());
                 player.closeInventory();
@@ -861,7 +904,11 @@ public final class AdminGuiManager implements AdminGuiNavigator, AdminGuiClickHa
     }
 
     private AdminSetupService.SetupSnapshot snapshot() {
-        return setupService.snapshot(gameManager.getSurvivors().size(), gameManager.getInfected().size());
+        return setupService.snapshot(
+                gameManager.getSurvivors().size(),
+                gameManager.getInfected().size(),
+                gameManager.configuredStartingInfected()
+        );
     }
 
     private List<PlayerEntry> playerEntries() {

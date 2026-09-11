@@ -28,6 +28,7 @@ public final class GeneratedChestService {
     private final ChestOperationGate operationGate;
     private final Function<String, World> worldLookup;
     private final LongSupplier seedSupplier;
+    private ActiveOperation activeOperation;
 
     public GeneratedChestService(GameManager gameManager, Supplier<WeaponLootCatalog> catalogSupplier,
                                  GeneratedChestRepository repository, OutdoorChestSiteValidator validator,
@@ -57,6 +58,10 @@ public final class GeneratedChestService {
 
     public boolean isOperationActive() {
         return operationGate.isActive();
+    }
+
+    public long layoutRevision() {
+        return repository.revision();
     }
 
     public void executeAsync(Plugin plugin, ActionType action, Consumer<ActionResult> completion) {
@@ -93,23 +98,42 @@ public final class GeneratedChestService {
                     + readable(exception)));
             return;
         }
-        BukkitTask[] scheduled = new BukkitTask[1];
+        ActiveOperation active = new ActiveOperation(operation, lease, completion);
+        activeOperation = active;
         Runnable tick = () -> {
+            if (activeOperation != active || active.completed) return;
             boolean finished = operation.step(CANDIDATES_PER_TICK, MUTATIONS_PER_TICK);
             progress.accept(operation.progress());
             if (!finished) return;
-            scheduled[0].cancel();
-            lease.close();
-            completion.accept(operation.result());
+            finish(active, operation.result());
         };
         try {
             progress.accept(operation.progress());
-            scheduled[0] = plugin.getServer().getScheduler().runTaskTimer(plugin, tick, 1L, 1L);
+            active.task = plugin.getServer().getScheduler().runTaskTimer(plugin, tick, 1L, 1L);
+            if (active.completed) active.task.cancel();
         } catch (RuntimeException exception) {
+            if (activeOperation == active) activeOperation = null;
+            operation.cancel("Could not schedule generated chest operation.");
             lease.close();
             completion.accept(ActionResult.failure("Could not schedule generated chest operation: "
                     + readable(exception)));
         }
+    }
+
+    public void shutdown() {
+        ActiveOperation active = activeOperation;
+        if (active == null || active.completed) return;
+        active.operation.cancel("Generated chest operation was cancelled because the plugin is disabling.");
+        finish(active, active.operation.result());
+    }
+
+    private void finish(ActiveOperation active, ActionResult result) {
+        if (active.completed) return;
+        active.completed = true;
+        if (active.task != null) active.task.cancel();
+        if (activeOperation == active) activeOperation = null;
+        active.lease.close();
+        active.completion.accept(result);
     }
 
     private Validation validate(ActionType action) {
@@ -129,6 +153,7 @@ public final class GeneratedChestService {
             }
             return new Validation(null, null, 0, errors);
         }
+        errors.addAll(catalog.errors());
         if (catalog.point1() == null || catalog.point2() == null) {
             errors.add("Select both region points first.");
             return new Validation(null, null, 0, errors);
@@ -174,6 +199,21 @@ public final class GeneratedChestService {
         public ActionResult { errors = List.copyOf(errors); }
         static ActionResult success(int count) { return new ActionResult(true, count, List.of()); }
         static ActionResult failure(String error) { return new ActionResult(false, 0, List.of(error)); }
+    }
+
+    private final class ActiveOperation {
+        private final StreamedGeneratedChestOperation operation;
+        private final ChestOperationGate.Lease lease;
+        private final Consumer<ActionResult> completion;
+        private BukkitTask task;
+        private boolean completed;
+
+        private ActiveOperation(StreamedGeneratedChestOperation operation, ChestOperationGate.Lease lease,
+                                Consumer<ActionResult> completion) {
+            this.operation = operation;
+            this.lease = lease;
+            this.completion = completion;
+        }
     }
 
     private record Validation(World world, ChestRegion region, int targetCount, List<String> errors) {

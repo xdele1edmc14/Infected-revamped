@@ -7,9 +7,11 @@ import org.bukkit.inventory.ItemStack;
 import org.bukkit.plugin.Plugin;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -19,7 +21,6 @@ import java.util.concurrent.CompletionException;
 import java.util.function.BooleanSupplier;
 
 final class StreamedChestOperation {
-    private final Plugin plugin;
     private final World world;
     private final ChestRegion region;
     private final WeaponLootCatalog catalog;
@@ -28,14 +29,20 @@ final class StreamedChestOperation {
     private final WeaponChestService.ActionType action;
     private final BooleanSupplier operationStillAllowed;
     private final Iterator<ChestRegion.ChunkKey> chunks;
-    private final Map<String, DiscoveredChest> chests = new LinkedHashMap<>();
-    private final List<RetainedChunk> retainedChunks = new ArrayList<>();
+    private final Set<ChestRegion.ChunkKey> candidateChunks = new LinkedHashSet<>();
+    private final Map<String, ChestTarget> targets = new LinkedHashMap<>();
     private final List<PendingChunk> pendingLoads = new ArrayList<>();
     private final List<Map<Integer, ItemStack>> plans = new ArrayList<>();
+    private final List<AppliedMutation> appliedMutations = new ArrayList<>();
     private Stage stage = Stage.SCAN;
+    private Iterator<ChestRegion.ChunkKey> stabilizationChunks;
+    private List<ChestTarget> orderedTargets = List.of();
+    private PendingWindow pendingWindow;
+    private ChestRegion.ChunkKey currentStabilizationChunk;
+    private ChestTarget currentApplyTarget;
     private int chestIndex;
-    private int retainedChunkIndex;
     private int scannedChunks;
+    private int stabilizedChunks;
     private final int totalChunks;
     private WeaponChestService.ActionResult result;
 
@@ -43,7 +50,7 @@ final class StreamedChestOperation {
                            WeaponLootCatalog catalog, ChestDiscoveryService discovery,
                            ChestLootGenerator generator, WeaponChestService.ActionType action,
                            BooleanSupplier operationStillAllowed) {
-        this.plugin = Objects.requireNonNull(plugin, "plugin");
+        Objects.requireNonNull(plugin, "plugin");
         this.world = Objects.requireNonNull(world, "world");
         this.region = Objects.requireNonNull(region, "region");
         this.catalog = Objects.requireNonNull(catalog, "catalog");
@@ -67,7 +74,7 @@ final class StreamedChestOperation {
         try {
             switch (stage) {
                 case SCAN -> scan(chunkBudget);
-                case RESCAN -> rescan(chunkBudget);
+                case STABILIZE -> stabilize(chunkBudget);
                 case PLAN -> plan(chestBudget);
                 case APPLY -> apply(chestBudget);
                 case DONE -> { }
@@ -83,15 +90,21 @@ final class StreamedChestOperation {
         return result;
     }
 
+    void cancel(String reason) {
+        if (stage != Stage.DONE) {
+            fail(reason == null || reason.isBlank() ? "Chest operation was cancelled." : reason);
+        }
+    }
+
     ChestOperationProgress progress() {
         return switch (stage) {
             case SCAN -> new ChestOperationProgress("Scanning chunks", scannedChunks, totalChunks);
-            case RESCAN -> new ChestOperationProgress("Stabilizing chests", retainedChunkIndex,
-                    retainedChunks.size());
-            case PLAN -> new ChestOperationProgress("Planning loot", chestIndex, chests.size());
+            case STABILIZE -> new ChestOperationProgress(
+                    "Stabilizing chests", stabilizedChunks, candidateChunks.size());
+            case PLAN -> new ChestOperationProgress("Planning loot", chestIndex, orderedTargets.size());
             case APPLY -> new ChestOperationProgress(
                     action == WeaponChestService.ActionType.FILL ? "Filling chests" : "Emptying chests",
-                    chestIndex, chests.size());
+                    chestIndex, orderedTargets.size());
             case DONE -> new ChestOperationProgress("Chest operation complete", 1, 1);
         };
     }
@@ -119,79 +132,91 @@ final class StreamedChestOperation {
             PendingChunk load = pending.next();
             if (!load.future().isDone()) continue;
             pending.remove();
-            Chunk chunk;
+            Chunk chunk = loadedChunk(load);
             try {
-                chunk = load.future().join();
-            } catch (CompletionException exception) {
-                Throwable cause = exception.getCause() == null ? exception : exception.getCause();
-                fail("Selected chunk " + load.key().x() + ", " + load.key().z()
-                        + " could not be loaded: " + readableMessage(cause));
-                return;
-            }
-            if (chunk == null) {
-                fail("Selected chunk " + load.key().x() + ", " + load.key().z()
-                        + " could not be loaded without generating terrain.");
-                return;
-            }
-            boolean retained = false;
-            try {
-                List<DiscoveredChest> found = discovery.discover(region, chunk);
-                found.forEach(chest -> chests.putIfAbsent(chest.key(), chest));
-                if (!found.isEmpty()) {
-                    boolean ticketAdded = chunk.addPluginChunkTicket(plugin);
-                    retainedChunks.add(new RetainedChunk(chunk, load.loadedByOperation(), ticketAdded));
-                    retained = true;
-                } else if (load.loadedByOperation()) {
-                    chunk.unload(false);
+                if (!discovery.discover(region, chunk).isEmpty()) {
+                    candidateChunks.add(load.key());
                 }
-            } catch (RuntimeException exception) {
-                if (load.loadedByOperation() && !retained) chunk.unload(false);
-                throw exception;
+            } finally {
+                if (load.loadedByOperation()) chunk.unload(false);
             }
             processed++;
             scannedChunks++;
         }
         if (chunks.hasNext() || !pendingLoads.isEmpty() || stage == Stage.DONE) return;
-        if (chests.isEmpty()) {
+        if (candidateChunks.isEmpty()) {
             fail("No chests were found in the selected region.");
             return;
         }
-        if (!operationStillAllowed.getAsBoolean()) {
-            fail("Chest loot can only be changed while no round is running.");
-            return;
-        }
-        chests.clear();
-        retainedChunkIndex = 0;
-        stage = Stage.RESCAN;
+        stabilizationChunks = candidateChunks.iterator();
+        stage = Stage.STABILIZE;
     }
 
-    private void rescan(int budget) {
-        for (int processed = 0; processed < budget && retainedChunkIndex < retainedChunks.size();
-             processed++, retainedChunkIndex++) {
-            discovery.discover(region, retainedChunks.get(retainedChunkIndex).chunk()).forEach(
-                    chest -> chests.putIfAbsent(chest.key(), chest));
+    private void stabilize(int budget) {
+        int processed = 0;
+        while (processed < budget) {
+            if (pendingWindow == null) {
+                if (!stabilizationChunks.hasNext()) break;
+                currentStabilizationChunk = stabilizationChunks.next();
+                pendingWindow = beginWindow(stabilizationWindow(currentStabilizationChunk));
+            }
+            if (!pendingWindow.ready()) return;
+            PendingWindow completedWindow = pendingWindow;
+            try {
+                for (LoadedChunk loaded : loadedChunks(completedWindow)) {
+                    for (DiscoveredChest chest : discovery.discover(region, loaded.chunk())) {
+                        Set<ChestRegion.ChunkKey> required = chest.chunks().isEmpty()
+                                ? Set.of(loaded.key()) : chest.chunks();
+                        ChestTarget target = new ChestTarget(chest.key(), chest.inventory().getSize(), required);
+                        ChestTarget existing = targets.putIfAbsent(chest.key(), target);
+                        if (existing != null && existing.inventorySize() != target.inventorySize()) {
+                            throw new IllegalStateException("Chest layout changed while it was being stabilized.");
+                        }
+                    }
+                }
+            } finally {
+                releaseWindow(completedWindow, false);
+                pendingWindow = null;
+                currentStabilizationChunk = null;
+            }
+            stabilizedChunks++;
+            processed++;
         }
-        if (retainedChunkIndex < retainedChunks.size()) return;
-        if (chests.isEmpty()) {
+        if (pendingWindow != null || stabilizationChunks.hasNext()) return;
+        if (targets.isEmpty()) {
             fail("No chests were found in the selected region after loaded chunks were stabilized.");
             return;
         }
-        stage = action == WeaponChestService.ActionType.FILL ? Stage.PLAN : Stage.APPLY;
+        orderedTargets = targets.values().stream()
+                .sorted(Comparator.comparing(ChestTarget::key))
+                .toList();
         chestIndex = 0;
+        stage = action == WeaponChestService.ActionType.FILL ? Stage.PLAN : Stage.APPLY;
+    }
+
+    private Set<ChestRegion.ChunkKey> stabilizationWindow(ChestRegion.ChunkKey center) {
+        Set<ChestRegion.ChunkKey> window = new LinkedHashSet<>();
+        for (int dx = -1; dx <= 1; dx++) {
+            for (int dz = -1; dz <= 1; dz++) {
+                ChestRegion.ChunkKey candidate = new ChestRegion.ChunkKey(center.x() + dx, center.z() + dz);
+                if (candidateChunks.contains(candidate)) window.add(candidate);
+            }
+        }
+        return window;
     }
 
     private void plan(int budget) {
-        List<DiscoveredChest> discovered = new ArrayList<>(chests.values());
-        for (int processed = 0; processed < budget && chestIndex < discovered.size(); processed++, chestIndex++) {
+        for (int processed = 0; processed < budget && chestIndex < orderedTargets.size();
+             processed++, chestIndex++) {
             ChestLootGenerator.PlanResult plan = generator.plan(catalog,
-                    discovered.get(chestIndex).inventory().getSize());
+                    orderedTargets.get(chestIndex).inventorySize());
             if (!plan.success()) {
                 fail(String.join("; ", plan.errors()));
                 return;
             }
             plans.add(plan.contents());
         }
-        if (chestIndex < discovered.size() || stage == Stage.DONE) return;
+        if (chestIndex < orderedTargets.size() || stage == Stage.DONE) return;
         if (!operationStillAllowed.getAsBoolean()) {
             fail("Chest loot can only be changed while no round is running.");
             return;
@@ -201,69 +226,204 @@ final class StreamedChestOperation {
     }
 
     private void apply(int budget) {
-        List<DiscoveredChest> discovered = new ArrayList<>(chests.values());
-        for (int processed = 0; processed < budget && chestIndex < discovered.size(); processed++, chestIndex++) {
-            Inventory inventory = discovered.get(chestIndex).inventory();
-            inventory.clear();
-            if (action == WeaponChestService.ActionType.FILL) {
-                plans.get(chestIndex).forEach((slot, item) -> inventory.setItem(slot, item.clone()));
+        int processed = 0;
+        while (processed < budget && chestIndex < orderedTargets.size()) {
+            if (pendingWindow == null) {
+                currentApplyTarget = orderedTargets.get(chestIndex);
+                pendingWindow = beginWindow(currentApplyTarget.chunks());
             }
+            if (!pendingWindow.ready()) return;
+            PendingWindow completedWindow = pendingWindow;
+            boolean windowMutated = false;
+            try {
+                Map<String, DiscoveredChest> current = new LinkedHashMap<>();
+                for (LoadedChunk loaded : loadedChunks(completedWindow)) {
+                    discovery.discover(region, loaded.chunk()).forEach(
+                            chest -> current.putIfAbsent(chest.key(), chest));
+                }
+                DiscoveredChest chest = current.get(currentApplyTarget.key());
+                if (chest == null || chest.inventory().getSize() != currentApplyTarget.inventorySize()) {
+                    throw new IllegalStateException("Chest " + currentApplyTarget.key()
+                            + " changed or is no longer eligible before mutation.");
+                }
+                Inventory inventory = chest.inventory();
+                appliedMutations.add(new AppliedMutation(
+                        currentApplyTarget, copyContents(inventory.getContents())));
+                windowMutated = true;
+                inventory.clear();
+                if (action == WeaponChestService.ActionType.FILL) {
+                    plans.get(chestIndex).forEach((slot, item) -> inventory.setItem(slot, item.clone()));
+                }
+            } finally {
+                releaseWindow(completedWindow, windowMutated);
+                pendingWindow = null;
+                currentApplyTarget = null;
+            }
+            chestIndex++;
+            processed++;
         }
-        if (chestIndex < discovered.size()) return;
-        complete(WeaponChestService.ActionResult.success(discovered.size()));
+        if (chestIndex >= orderedTargets.size()) {
+            complete(WeaponChestService.ActionResult.success(orderedTargets.size()));
+        }
+    }
+
+    private PendingWindow beginWindow(Set<ChestRegion.ChunkKey> keys) {
+        List<LoadRequest> requests = new ArrayList<>();
+        for (ChestRegion.ChunkKey key : keys) {
+            boolean loadedByOperation = !world.isChunkLoaded(key.x(), key.z());
+            if (loadedByOperation && !world.isChunkGenerated(key.x(), key.z())) {
+                throw new IllegalStateException("Selected chunk " + key.x() + ", " + key.z()
+                        + " is not generated; terrain generation was refused.");
+            }
+            requests.add(new LoadRequest(key, loadedByOperation));
+        }
+        List<PendingChunk> loads = new ArrayList<>();
+        try {
+            for (LoadRequest request : requests) {
+                CompletableFuture<Chunk> future = request.loadedByOperation()
+                        ? world.getChunkAtAsync(request.key().x(), request.key().z(), false)
+                        : CompletableFuture.completedFuture(
+                                world.getChunkAt(request.key().x(), request.key().z()));
+                loads.add(new PendingChunk(request.key(), future, request.loadedByOperation()));
+            }
+        } catch (RuntimeException exception) {
+            releaseLoads(loads, false);
+            throw exception;
+        }
+        return new PendingWindow(loads);
+    }
+
+    private List<LoadedChunk> loadedChunks(PendingWindow window) {
+        List<LoadedChunk> loaded = new ArrayList<>(window.loads().size());
+        for (PendingChunk load : window.loads()) {
+            loaded.add(new LoadedChunk(load.key(), loadedChunk(load)));
+        }
+        return loaded;
+    }
+
+    private Chunk loadedChunk(PendingChunk load) {
+        try {
+            Chunk chunk = load.future().join();
+            if (chunk == null) {
+                throw new IllegalStateException("Selected chunk " + load.key().x() + ", " + load.key().z()
+                        + " could not be loaded without generating terrain.");
+            }
+            return chunk;
+        } catch (CompletionException exception) {
+            Throwable cause = exception.getCause() == null ? exception : exception.getCause();
+            throw new IllegalStateException("Selected chunk " + load.key().x() + ", " + load.key().z()
+                    + " could not be loaded: " + readableMessage(cause), cause);
+        }
+    }
+
+    private void releaseWindow(PendingWindow window, boolean save) {
+        releaseLoads(window.loads(), save);
+    }
+
+    private void releaseLoads(List<PendingChunk> loads, boolean save) {
+        Set<Chunk> released = new HashSet<>();
+        for (PendingChunk load : loads) {
+            if (!load.loadedByOperation()) continue;
+            Chunk chunk;
+            try {
+                chunk = load.future().getNow(null);
+            } catch (CompletionException exception) {
+                continue;
+            }
+            if (chunk != null && released.add(chunk)) chunk.unload(save);
+        }
     }
 
     private void fail(String error) {
-        complete(WeaponChestService.ActionResult.failure(error));
+        List<String> errors = new ArrayList<>();
+        errors.add(error);
+        errors.addAll(rollbackAppliedMutations());
+        complete(new WeaponChestService.ActionResult(false, 0, errors));
+    }
+
+    private List<String> rollbackAppliedMutations() {
+        List<String> errors = new ArrayList<>();
+        for (int index = appliedMutations.size() - 1; index >= 0; index--) {
+            AppliedMutation mutation = appliedMutations.get(index);
+            List<SyncLoadedChunk> loaded = new ArrayList<>();
+            try {
+                for (ChestRegion.ChunkKey key : mutation.target().chunks()) {
+                    boolean loadedByOperation = !world.isChunkLoaded(key.x(), key.z());
+                    Chunk chunk = world.getChunkAt(key.x(), key.z());
+                    if (chunk == null) throw new IllegalStateException("Chunk could not be loaded for rollback.");
+                    loaded.add(new SyncLoadedChunk(chunk, loadedByOperation));
+                }
+                Map<String, DiscoveredChest> current = new LinkedHashMap<>();
+                for (SyncLoadedChunk loadedChunk : loaded) {
+                    discovery.discover(region, loadedChunk.chunk()).forEach(
+                            chest -> current.putIfAbsent(chest.key(), chest));
+                }
+                DiscoveredChest chest = current.get(mutation.target().key());
+                if (chest == null) {
+                    throw new IllegalStateException("Chest " + mutation.target().key()
+                            + " could not be found for rollback.");
+                }
+                chest.inventory().setContents(copyContents(mutation.contents()));
+            } catch (RuntimeException exception) {
+                errors.add("Could not roll back changed chest " + mutation.target().key() + ": "
+                        + readableMessage(exception));
+            } finally {
+                Set<Chunk> released = new HashSet<>();
+                for (SyncLoadedChunk loadedChunk : loaded) {
+                    if (loadedChunk.loadedByOperation() && released.add(loadedChunk.chunk())) {
+                        try {
+                            loadedChunk.chunk().unload(true);
+                        } catch (RuntimeException exception) {
+                            errors.add("Could not unload a rollback chunk: " + readableMessage(exception));
+                        }
+                    }
+                }
+            }
+        }
+        appliedMutations.clear();
+        return errors;
     }
 
     private void complete(WeaponChestService.ActionResult completed) {
         if (stage == Stage.DONE) return;
         stage = Stage.DONE;
         releasePendingLoads();
-        Set<Chunk> released = new HashSet<>();
-        List<String> cleanupErrors = new ArrayList<>();
-        for (RetainedChunk retained : retainedChunks) {
-            if (!released.add(retained.chunk())) continue;
-            if (retained.ticketAdded()) {
-                try {
-                    retained.chunk().removePluginChunkTicket(plugin);
-                } catch (RuntimeException exception) {
-                    cleanupErrors.add("Could not release a chest chunk ticket: " + readableMessage(exception));
-                }
-            }
-            if (retained.loadedByOperation()) {
-                try {
-                    retained.chunk().unload(false);
-                } catch (RuntimeException exception) {
-                    cleanupErrors.add("Could not unload a temporary chest chunk: " + readableMessage(exception));
-                }
-            }
-        }
-        retainedChunks.clear();
-        if (cleanupErrors.isEmpty()) {
-            result = completed;
-        } else {
-            List<String> errors = new ArrayList<>(completed.errors());
-            errors.addAll(cleanupErrors);
-            result = new WeaponChestService.ActionResult(false, completed.affectedChests(), errors);
-        }
+        appliedMutations.clear();
+        result = completed;
     }
 
     private void releasePendingLoads() {
-        List<PendingChunk> pending = new ArrayList<>(pendingLoads);
+        List<PendingChunk> scanning = new ArrayList<>(pendingLoads);
         pendingLoads.clear();
-        for (PendingChunk load : pending) {
+        releaseLoadsWhenReady(scanning);
+        PendingWindow window = pendingWindow;
+        pendingWindow = null;
+        currentApplyTarget = null;
+        currentStabilizationChunk = null;
+        if (window != null) releaseLoadsWhenReady(window.loads());
+    }
+
+    private void releaseLoadsWhenReady(List<PendingChunk> loads) {
+        for (PendingChunk load : loads) {
             if (!load.loadedByOperation()) continue;
             load.future().thenAccept(chunk -> {
                 if (chunk == null) return;
                 try {
                     chunk.unload(false);
                 } catch (RuntimeException ignored) {
-                    // Best effort: a player or another system may retain the asynchronously loaded chunk.
+                    // Best effort: another system may retain an asynchronously loaded chunk.
                 }
             });
         }
+    }
+
+    private static ItemStack[] copyContents(ItemStack[] contents) {
+        if (contents == null) return new ItemStack[0];
+        ItemStack[] copy = new ItemStack[contents.length];
+        for (int index = 0; index < contents.length; index++) {
+            copy[index] = contents[index] == null ? null : contents[index].clone();
+        }
+        return copy;
     }
 
     private static String readableMessage(Throwable throwable) {
@@ -271,8 +431,19 @@ final class StreamedChestOperation {
                 ? throwable.getClass().getSimpleName() : throwable.getMessage();
     }
 
-    private enum Stage { SCAN, RESCAN, PLAN, APPLY, DONE }
+    private enum Stage { SCAN, STABILIZE, PLAN, APPLY, DONE }
+
+    private record LoadRequest(ChestRegion.ChunkKey key, boolean loadedByOperation) {}
     private record PendingChunk(ChestRegion.ChunkKey key, CompletableFuture<Chunk> future,
                                 boolean loadedByOperation) {}
-    private record RetainedChunk(Chunk chunk, boolean loadedByOperation, boolean ticketAdded) {}
+    private record PendingWindow(List<PendingChunk> loads) {
+        private PendingWindow { loads = List.copyOf(loads); }
+        boolean ready() { return loads.stream().allMatch(load -> load.future().isDone()); }
+    }
+    private record LoadedChunk(ChestRegion.ChunkKey key, Chunk chunk) {}
+    private record SyncLoadedChunk(Chunk chunk, boolean loadedByOperation) {}
+    private record ChestTarget(String key, int inventorySize, Set<ChestRegion.ChunkKey> chunks) {
+        private ChestTarget { chunks = Set.copyOf(chunks); }
+    }
+    private record AppliedMutation(ChestTarget target, ItemStack[] contents) {}
 }

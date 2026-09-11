@@ -17,7 +17,10 @@ The original Infected plugin was created by **DaWHeL**. This repository is a for
 - A configurable number of players are chosen as the starting infected.
 - Survivors are sent into the arena first and receive a short head start.
 - Infected are released after the grace period and infect survivors through PvP.
-- The infected team grows until the round reaches its conclusion.
+- Deathmatch ends when every survivor is infected or every zombie runs out of respawn chances.
+- Time Limit gives zombies one life and lets survivors win by outlasting the configured timer.
+- Configurable tracking compasses point zombies at the nearest same-world survivor. Automatic
+  activation is mode-specific, and admins can override it with `/infected compass on|off|auto`.
 
 ## Current Technical Base
 

@@ -5,6 +5,7 @@ import org.bukkit.Location;
 import org.bukkit.World;
 import org.bukkit.entity.Player;
 import org.bukkit.event.player.PlayerMoveEvent;
+import org.bukkit.event.player.PlayerInteractEvent;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -83,6 +84,31 @@ class InfectedContainmentListenerTest {
         listener.onContainedInfectedMove(event);
 
         verify(event, never()).setTo(org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void keepsEarlySurvivorBatchesInTheirLandingBlock() {
+        when(gameManager.isContainedInfected(player)).thenReturn(false);
+        when(gameManager.isDeploymentLockedSurvivor(player)).thenReturn(true);
+        PlayerMoveEvent event = event(
+                new Location(world, 10.2, 64, 5.2),
+                new Location(world, 11.2, 64, 5.2));
+
+        listener.onContainedInfectedMove(event);
+
+        verify(event).setTo(org.mockito.ArgumentMatchers.any(Location.class));
+    }
+
+    @Test
+    void blocksEarlySurvivorBatchesFromLootingUntilDeploymentCompletes() {
+        when(gameManager.isContainedInfected(player)).thenReturn(false);
+        when(gameManager.isDeploymentLockedSurvivor(player)).thenReturn(true);
+        PlayerInteractEvent event = mock(PlayerInteractEvent.class);
+        when(event.getPlayer()).thenReturn(player);
+
+        listener.onContainedPlayerInteract(event);
+
+        verify(event).setCancelled(true);
     }
 
     private PlayerMoveEvent event(Location from, Location to) {

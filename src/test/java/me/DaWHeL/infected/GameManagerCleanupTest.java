@@ -5,10 +5,14 @@ import org.bukkit.Location;
 import org.bukkit.Chunk;
 import org.bukkit.Server;
 import org.bukkit.World;
+import org.bukkit.WorldBorder;
+import org.bukkit.Material;
+import org.bukkit.block.Block;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.PlayerInventory;
 import org.bukkit.scheduler.BukkitTask;
+import org.bukkit.util.BoundingBox;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
@@ -30,6 +34,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.mock;
@@ -56,9 +61,30 @@ class GameManagerCleanupTest {
         config.set("settings.teleport-delay", 40);
         config.set("settings.infected-teleport-delay", 0);
         World world = mock(World.class);
+        WorldBorder border = mock(WorldBorder.class);
+        when(world.getWorldBorder()).thenReturn(border);
+        when(border.isInside(any(Location.class))).thenReturn(true);
+        when(world.getMinHeight()).thenReturn(-64);
+        when(world.getMaxHeight()).thenReturn(320);
+        when(world.isChunkLoaded(anyInt(), anyInt())).thenReturn(true);
+        when(world.getBlockAt(anyInt(), anyInt(), anyInt())).thenAnswer(invocation -> {
+            int x = invocation.getArgument(0);
+            int y = invocation.getArgument(1);
+            int z = invocation.getArgument(2);
+            Block block = mock(Block.class);
+            if (y == 63) {
+                when(block.getType()).thenReturn(Material.STONE);
+                when(block.isPassable()).thenReturn(false);
+                when(block.getBoundingBox()).thenReturn(new BoundingBox(x, y, z, x + 1, y + 1, z + 1));
+            } else {
+                when(block.getType()).thenReturn(Material.AIR);
+                when(block.isPassable()).thenReturn(true);
+            }
+            return block;
+        });
         when(world.getChunkAtAsync(anyInt(), anyInt(), org.mockito.ArgumentMatchers.eq(false)))
                 .thenReturn(CompletableFuture.completedFuture(mock(Chunk.class)));
-        Location location = new Location(world, 0, 64, 0);
+        Location location = new Location(world, 0.5, 64, 0.5);
         when(repository.loadedHoldingSpawn()).thenReturn(Optional.of(location));
         for (SpawnRole role : SpawnRole.values()) {
             when(repository.loadedLocations(role)).thenReturn(List.of(location));
@@ -127,7 +153,7 @@ class GameManagerCleanupTest {
         assertEquals(RoundPhase.ENDING, manager.getPhase());
 
         ArgumentCaptor<Runnable> cleanup = ArgumentCaptor.forClass(Runnable.class);
-        verify(scheduler).runRepeating(cleanup.capture(), anyLong(), anyLong());
+        verify(scheduler).runRepeating(cleanup.capture(), eq(0L), eq(40L));
         secondOnline.set(false);
         cleanup.getValue().run();
         assertEquals(rosterSizeBeforeStop,

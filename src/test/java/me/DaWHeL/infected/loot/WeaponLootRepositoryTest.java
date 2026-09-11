@@ -68,6 +68,22 @@ class WeaponLootRepositoryTest {
     }
 
     @Test
+    void revisionChangesWheneverTheCatalogIsReloadedOrSaved() {
+        WeaponLootRepository repository = new WeaponLootRepository(
+                directory.toFile(), mock(ItemSnapshotCodec.class));
+        long initial = repository.revision();
+
+        repository.setPoint(1, new BlockPoint("arena", 1, 2, 3));
+        long afterSave = repository.revision();
+        repository.reload();
+
+        assertAll(
+                () -> assertTrue(afterSave > initial),
+                () -> assertTrue(repository.revision() > afterSave)
+        );
+    }
+
+    @Test
     void unrelatedSavePreservesMalformedEntriesAndTheirValidationErrors() throws Exception {
         String invalidId = "00000000-0000-0000-0000-000000000001";
         Files.writeString(directory.resolve("weapon-loot.yml"), """

@@ -3,6 +3,7 @@ package me.DaWHeL.infected;
 import net.kyori.adventure.text.Component;
 import org.bukkit.Bukkit;
 import org.bukkit.configuration.file.YamlConfiguration;
+import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.entity.Player;
 import org.bukkit.scoreboard.Objective;
 import org.bukkit.scoreboard.Score;
@@ -96,6 +97,33 @@ class ScoreboardManagerGlowTest {
 
         verify(bukkitScoreboards, never()).getNewScoreboard();
         verify(viewer, times(1)).setScoreboard(mainScoreboard);
+    }
+
+    @Test
+    void cachesParsedConfigurationUntilAnExplicitReload() {
+        InfectedPlugin plugin = mock(InfectedPlugin.class);
+        GameManager gameManager = mock(GameManager.class);
+        Player viewer = player("cached-config-viewer");
+        FileConfiguration config = mock(FileConfiguration.class);
+        Scoreboard mainScoreboard = mock(Scoreboard.class);
+        org.bukkit.scoreboard.ScoreboardManager bukkitScoreboards =
+                mock(org.bukkit.scoreboard.ScoreboardManager.class);
+        when(plugin.getConfig()).thenReturn(config);
+        when(config.getBoolean("scoreboard.enabled", true)).thenReturn(false);
+        when(bukkitScoreboards.getMainScoreboard()).thenReturn(mainScoreboard);
+
+        try (MockedStatic<Bukkit> bukkit = mockStatic(Bukkit.class)) {
+            bukkit.when(Bukkit::getScoreboardManager).thenReturn(bukkitScoreboards);
+            ScoreboardManager manager = new ScoreboardManager(plugin, gameManager);
+
+            manager.applyScoreboard(viewer);
+            manager.applyScoreboard(viewer);
+            manager.reloadConfiguration();
+            manager.applyScoreboard(viewer);
+        }
+
+        verify(plugin, times(2)).getConfig();
+        verify(config, times(2)).getBoolean("scoreboard.enabled", true);
     }
 
     private static Player player(String name) {

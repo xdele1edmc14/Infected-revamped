@@ -22,6 +22,7 @@ public final class WeaponChestService {
     private final ChestDiscoveryService discovery;
     private final ChestLootGenerator generator;
     private final ChestOperationGate operationGate;
+    private ActiveOperation activeOperation;
 
     public WeaponChestService(GameManager gameManager, Supplier<WeaponLootCatalog> catalogSupplier,
                               ChestDiscoveryService discovery, ChestLootGenerator generator) {
@@ -86,22 +87,41 @@ public final class WeaponChestService {
         StreamedChestOperation operation = new StreamedChestOperation(
                 plugin, world, validation.region, validation.catalog, discovery, generator, action,
                 () -> gameManager.getPhase() == RoundPhase.LOBBY);
-        BukkitTask[] scheduled = new BukkitTask[1];
+        ActiveOperation active = new ActiveOperation(operation, lease, completion);
+        activeOperation = active;
         Runnable tick = () -> {
+            if (activeOperation != active || active.completed) return;
             boolean finished = operation.step(CHUNKS_PER_TICK, CHESTS_PER_TICK);
             progress.accept(operation.progress());
             if (!finished) return;
-            scheduled[0].cancel();
-            lease.close();
-            completion.accept(operation.result());
+            finish(active, operation.result());
         };
         try {
             progress.accept(operation.progress());
-            scheduled[0] = plugin.getServer().getScheduler().runTaskTimer(plugin, tick, 1L, 1L);
+            active.task = plugin.getServer().getScheduler().runTaskTimer(plugin, tick, 1L, 1L);
+            if (active.completed) active.task.cancel();
         } catch (RuntimeException exception) {
+            if (activeOperation == active) activeOperation = null;
+            operation.cancel("Could not schedule chest operation.");
             lease.close();
             completion.accept(ActionResult.failure("Could not schedule chest operation: " + exception.getMessage()));
         }
+    }
+
+    public void shutdown() {
+        ActiveOperation active = activeOperation;
+        if (active == null || active.completed) return;
+        active.operation.cancel("Chest operation was cancelled because the plugin is disabling.");
+        finish(active, active.operation.result());
+    }
+
+    private void finish(ActiveOperation active, ActionResult result) {
+        if (active.completed) return;
+        active.completed = true;
+        if (active.task != null) active.task.cancel();
+        if (activeOperation == active) activeOperation = null;
+        active.lease.close();
+        active.completion.accept(result);
     }
 
     private ActionResult execute(ActionType action) {
@@ -169,6 +189,21 @@ public final class WeaponChestService {
         public ActionResult { errors = List.copyOf(errors); }
         static ActionResult success(int count) { return new ActionResult(true, count, List.of()); }
         static ActionResult failure(String error) { return new ActionResult(false, 0, List.of(error)); }
+    }
+
+    private final class ActiveOperation {
+        private final StreamedChestOperation operation;
+        private final ChestOperationGate.Lease lease;
+        private final Consumer<ActionResult> completion;
+        private BukkitTask task;
+        private boolean completed;
+
+        private ActiveOperation(StreamedChestOperation operation, ChestOperationGate.Lease lease,
+                                Consumer<ActionResult> completion) {
+            this.operation = operation;
+            this.lease = lease;
+            this.completion = completion;
+        }
     }
     private record Configuration(WeaponLootCatalog catalog, ChestRegion region, List<String> errors) {}
 }

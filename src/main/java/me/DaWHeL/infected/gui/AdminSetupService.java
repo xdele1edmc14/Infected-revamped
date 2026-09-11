@@ -5,7 +5,6 @@ import me.DaWHeL.infected.RoundStartValidator;
 import me.DaWHeL.infected.SpawnRepository;
 import me.DaWHeL.infected.SpawnRole;
 import org.bukkit.Location;
-import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.FileConfiguration;
 
 import java.util.List;
@@ -14,7 +13,6 @@ import java.util.Objects;
 import java.util.Optional;
 
 public final class AdminSetupService {
-    private static final String INFECTED_SPAWN = "infected-spawn";
     private final InfectedPlugin plugin;
     private final SpawnRepository spawnRepository;
 
@@ -28,7 +26,7 @@ public final class AdminSetupService {
     }
 
     public Optional<StoredLocation> infectedSpawn() {
-        return readLocation(INFECTED_SPAWN);
+        return spawnRepository.holdingSpawn().map(AdminSetupService::storedLocation);
     }
 
     public List<TeleportPoint> teleportPoints() {
@@ -42,14 +40,18 @@ public final class AdminSetupService {
     }
 
     public SetupSnapshot snapshot(int survivors, int infected) {
+        return snapshot(survivors, infected, config().getInt("settings.starting-zombies", 5));
+    }
+
+    public SetupSnapshot snapshot(int survivors, int infected, int startingInfected) {
         return new SetupSnapshot(
-                infectedSpawn().isPresent(),
-                teleportPoints(SpawnRole.SURVIVOR).size(),
-                teleportPoints(SpawnRole.INFECTED_RELEASE).size(),
-                teleportPoints(SpawnRole.INFECTED_RESPAWN).size(),
+                spawnRepository.holdingSpawn().isPresent(),
+                spawnRepository.points(SpawnRole.SURVIVOR).size(),
+                spawnRepository.points(SpawnRole.INFECTED_RELEASE).size(),
+                spawnRepository.points(SpawnRole.INFECTED_RESPAWN).size(),
                 survivors,
                 infected,
-                config().getInt("settings.starting-zombies", 5),
+                startingInfected,
                 config().getInt("settings.infected-teleport-delay", 10),
                 config().getInt("settings.teleport-batch-size", 10),
                 config().getInt("settings.teleport-delay", 5)
@@ -57,17 +59,11 @@ public final class AdminSetupService {
     }
 
     public void setInfectedSpawn(Location location) {
-        writeLocation(INFECTED_SPAWN, location);
-        plugin.saveConfig();
+        spawnRepository.saveHoldingSpawn(location);
     }
 
     public boolean clearInfectedSpawn() {
-        if (!config().contains(INFECTED_SPAWN)) {
-            return false;
-        }
-        config().set(INFECTED_SPAWN, null);
-        plugin.saveConfig();
-        return true;
+        return spawnRepository.deleteHoldingSpawn();
     }
 
     public void saveTeleportPoint(String name, Location location) {
@@ -92,39 +88,6 @@ public final class AdminSetupService {
         if (name == null || name.isBlank() || name.contains(".")) {
             throw new IllegalArgumentException("Teleport point names cannot be blank or contain periods.");
         }
-    }
-
-    private Optional<StoredLocation> readLocation(String path) {
-        ConfigurationSection section = config().getConfigurationSection(path);
-        if (section == null) {
-            return Optional.empty();
-        }
-        String world = section.getString("world");
-        if (world == null || world.isBlank()) {
-            return Optional.empty();
-        }
-        return Optional.of(new StoredLocation(
-                world,
-                section.getDouble("x"),
-                section.getDouble("y"),
-                section.getDouble("z"),
-                (float) section.getDouble("yaw"),
-                (float) section.getDouble("pitch")
-        ));
-    }
-
-    private void writeLocation(String path, Location location) {
-        Objects.requireNonNull(location, "location");
-        if (location.getWorld() == null) {
-            throw new IllegalArgumentException("Location must have a world.");
-        }
-        FileConfiguration config = config();
-        config.set(path + ".world", location.getWorld().getName());
-        config.set(path + ".x", location.getX());
-        config.set(path + ".y", location.getY());
-        config.set(path + ".z", location.getZ());
-        config.set(path + ".yaw", location.getYaw());
-        config.set(path + ".pitch", location.getPitch());
     }
 
     private FileConfiguration config() {

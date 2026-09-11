@@ -244,7 +244,7 @@ public final class WeaponLootGuiManager {
         }
     }
 
-    private static boolean acceptsDrop(WeaponMenuHolder.MenuType type, int slot) {
+    static boolean acceptsDrop(WeaponMenuHolder.MenuType type, int slot) {
         return switch (type) {
             case GUNS, GRENADES -> slot == CLOSE;
             case GUN_EDITOR -> slot == 22 || slot == 30;
@@ -336,8 +336,7 @@ public final class WeaponLootGuiManager {
             if (!preview.success()) { sendErrors(player, errors); openWizard(player); return; }
         }
         WeaponLootCatalog catalog = repository.snapshot();
-        String expectedState = type == WeaponMenuHolder.MenuType.CONFIRM_GENERATE
-                ? generationKey(catalog) : regionKey(catalog);
+        String expectedState = chestActionState();
         Inventory menu = create(WeaponMenuHolder.confirmation(type, expectedState), 27,
                 ChatColor.DARK_GRAY + "Confirm Chest Action");
         fillAll(menu, Material.GRAY_STAINED_GLASS_PANE);
@@ -363,18 +362,10 @@ public final class WeaponLootGuiManager {
     private void confirmationClick(Player player, WeaponMenuHolder holder, int slot) {
         if (slot == 15) { if (holder.target() == null) openWizard(player); else if (holder.type() == WeaponMenuHolder.MenuType.CONFIRM_DELETE_GUN) openGunEditor(player, holder.target(), holder.page()); else openGrenadeEditor(player, holder.target(), holder.page()); return; }
         if (slot != 11) return;
-        if ((holder.type() == WeaponMenuHolder.MenuType.CONFIRM_FILL
-                || holder.type() == WeaponMenuHolder.MenuType.CONFIRM_CLEAR)
-                && !Objects.equals(holder.expectedState(), regionKey(repository.snapshot()))) {
+        if (isChestAction(holder.type())
+                && !Objects.equals(holder.expectedState(), chestActionState())) {
             player.sendMessage(ChatColor.YELLOW
-                    + "The selected chest region changed while confirmation was open. Review it again.");
-            openWizard(player);
-            return;
-        }
-        if (holder.type() == WeaponMenuHolder.MenuType.CONFIRM_GENERATE
-                && !Objects.equals(holder.expectedState(), generationKey(repository.snapshot()))) {
-            player.sendMessage(ChatColor.YELLOW
-                    + "The selected region or generated chest count changed while confirmation was open. Review it again.");
+                    + "The chest configuration or generated layout changed while confirmation was open. Review it again.");
             openWizard(player);
             return;
         }
@@ -405,6 +396,11 @@ public final class WeaponLootGuiManager {
                 + "Scanning generated chunks in small batches. Missing terrain will not be generated...");
         ChestOperationProgressBar progressBar = startProgress(player);
         chestService.executeAsync(plugin, action, progressBar::update, result -> {
+            if (!player.isOnline()) {
+                finishDisconnected(player, progressBar, "Chest inventory operation", result.success(),
+                        result.affectedChests());
+                return;
+            }
             finishProgress(player, progressBar, result.success(), result.affectedChests());
             reportAction(player, result, verb);
         });
@@ -417,6 +413,11 @@ public final class WeaponLootGuiManager {
                 : "Restoring registered generated chest sites in small batches..."));
         ChestOperationProgressBar progressBar = startProgress(player);
         generatedChestService.executeAsync(plugin, action, progressBar::update, result -> {
+            if (!player.isOnline()) {
+                finishDisconnected(player, progressBar, "Generated chest operation", result.success(),
+                        result.affectedChests());
+                return;
+            }
             finishProgress(player, progressBar, result.success(), result.affectedChests());
             if (result.success()) player.sendMessage(ChatColor.GREEN + "Successfully " + verb + " "
                     + result.affectedChests() + " chest structures.");
@@ -436,6 +437,14 @@ public final class WeaponLootGuiManager {
                                 boolean success, int affectedChests) {
         progressBars.remove(player.getUniqueId(), progressBar);
         progressBar.complete(success, affectedChests);
+    }
+
+    private void finishDisconnected(Player player, ChestOperationProgressBar progressBar,
+                                    String operation, boolean success, int affectedChests) {
+        progressBars.remove(player.getUniqueId(), progressBar);
+        progressBar.close();
+        plugin.getLogger().info(operation + " completed after the administrator disconnected: "
+                + (success ? "success" : "failure") + ", " + affectedChests + " affected chests.");
     }
 
     void closeProgress(Player player) {
@@ -522,12 +531,15 @@ public final class WeaponLootGuiManager {
             default -> "Review this action before continuing.";
         };
     }
-    private static String regionKey(WeaponLootCatalog catalog) {
-        return String.valueOf(catalog.point1()) + '|' + catalog.point2();
+    private String chestActionState() {
+        return "catalog=" + repository.revision() + "|layout=" + generatedChestService.layoutRevision();
     }
 
-    private static String generationKey(WeaponLootCatalog catalog) {
-        return regionKey(catalog) + "|generated=" + catalog.settings().generatedChestCount();
+    private static boolean isChestAction(WeaponMenuHolder.MenuType type) {
+        return type == WeaponMenuHolder.MenuType.CONFIRM_GENERATE
+                || type == WeaponMenuHolder.MenuType.CONFIRM_FILL
+                || type == WeaponMenuHolder.MenuType.CONFIRM_CLEAR
+                || type == WeaponMenuHolder.MenuType.CONFIRM_REMOVE;
     }
 
     private Inventory create(WeaponMenuHolder holder, int size, String title) {

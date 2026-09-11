@@ -55,6 +55,17 @@ public final class SpawnRepository {
                 .toList();
     }
 
+    public Optional<Location> loadedPoint(SpawnRole role, String name) {
+        Objects.requireNonNull(role, "role");
+        if (name == null) {
+            return Optional.empty();
+        }
+        return points(role).stream()
+                .filter(point -> point.name().equals(name))
+                .findFirst()
+                .flatMap(point -> resolve(point.location()));
+    }
+
     public Optional<Location> randomLocation(SpawnRole role, Random random) {
         Objects.requireNonNull(random, "random");
         List<Location> locations = loadedLocations(role);
@@ -69,6 +80,20 @@ public final class SpawnRepository {
         writeLocation(rolePath(Objects.requireNonNull(role, "role")) + "." + name,
                 fromLocation(location));
         plugin.saveConfig();
+    }
+
+    public void saveHoldingSpawn(Location location) {
+        writeLocation(HOLDING_SPAWN, fromLocation(location));
+        plugin.saveConfig();
+    }
+
+    public boolean deleteHoldingSpawn() {
+        if (!config().contains(HOLDING_SPAWN)) {
+            return false;
+        }
+        config().set(HOLDING_SPAWN, null);
+        plugin.saveConfig();
+        return true;
     }
 
     public boolean deletePoint(SpawnRole role, String name) {
@@ -109,8 +134,12 @@ public final class SpawnRepository {
             }
         }
 
-        config().set(MIGRATION_MARKER, true);
-        plugin.saveConfig();
+        if (skippedPaths.isEmpty()) {
+            config().set(MIGRATION_MARKER, true);
+        }
+        if (copiedEntries > 0 || skippedPaths.isEmpty()) {
+            plugin.saveConfig();
+        }
         return new MigrationResult(true, copiedEntries, List.copyOf(skippedPaths));
     }
 
@@ -123,14 +152,36 @@ public final class SpawnRepository {
         if (world == null || world.isBlank()) {
             return Optional.empty();
         }
+        Optional<Double> x = finiteNumber(section, "x");
+        Optional<Double> y = finiteNumber(section, "y");
+        Optional<Double> z = finiteNumber(section, "z");
+        Optional<Double> yaw = finiteNumber(section, "yaw");
+        Optional<Double> pitch = finiteNumber(section, "pitch");
+        if (x.isEmpty() || y.isEmpty() || z.isEmpty() || yaw.isEmpty() || pitch.isEmpty()) {
+            return Optional.empty();
+        }
+        float storedYaw = yaw.get().floatValue();
+        float storedPitch = pitch.get().floatValue();
+        if (!Float.isFinite(storedYaw) || !Float.isFinite(storedPitch)) {
+            return Optional.empty();
+        }
         return Optional.of(new StoredSpawn(
                 world,
-                section.getDouble("x"),
-                section.getDouble("y"),
-                section.getDouble("z"),
-                (float) section.getDouble("yaw"),
-                (float) section.getDouble("pitch")
+                x.get(),
+                y.get(),
+                z.get(),
+                storedYaw,
+                storedPitch
         ));
+    }
+
+    private static Optional<Double> finiteNumber(ConfigurationSection section, String key) {
+        Object raw = section.get(key);
+        if (!(raw instanceof Number number)) {
+            return Optional.empty();
+        }
+        double value = number.doubleValue();
+        return Double.isFinite(value) ? Optional.of(value) : Optional.empty();
     }
 
     private Optional<Location> resolve(StoredSpawn stored) {
@@ -162,6 +213,13 @@ public final class SpawnRepository {
         Objects.requireNonNull(location, "location");
         if (location.getWorld() == null) {
             throw new IllegalArgumentException("Location must have a world.");
+        }
+        if (!Double.isFinite(location.getX())
+                || !Double.isFinite(location.getY())
+                || !Double.isFinite(location.getZ())
+                || !Float.isFinite(location.getYaw())
+                || !Float.isFinite(location.getPitch())) {
+            throw new IllegalArgumentException("Location coordinates and rotation must be finite numbers.");
         }
         return new StoredSpawn(
                 location.getWorld().getName(),

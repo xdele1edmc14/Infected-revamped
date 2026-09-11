@@ -22,6 +22,7 @@ public final class GeneratedChestRepository {
     private final Map<UUID, GeneratedChestPlacement> placements = new LinkedHashMap<>();
     private final List<String> errors = new ArrayList<>();
     private boolean loadBlocked;
+    private long revision;
 
     public GeneratedChestRepository(File dataFolder) {
         Objects.requireNonNull(dataFolder, "dataFolder");
@@ -37,7 +38,12 @@ public final class GeneratedChestRepository {
         return List.copyOf(errors);
     }
 
+    public synchronized long revision() {
+        return revision;
+    }
+
     public synchronized List<String> reload() {
+        revision++;
         placements.clear();
         errors.clear();
         loadBlocked = false;
@@ -52,9 +58,11 @@ public final class GeneratedChestRepository {
                     UUID id = UUID.fromString(key);
                     String path = "placements." + key;
                     GeneratedChestPlacement placement = new GeneratedChestPlacement(
-                            id,
-                            Objects.requireNonNull(yaml.getString(path + ".world"), "missing world"),
-                            yaml.getInt(path + ".x"), yaml.getInt(path + ".y"), yaml.getInt(path + ".z"),
+                             id,
+                             Objects.requireNonNull(yaml.getString(path + ".world"), "missing world"),
+                             requiredInt(yaml, path + ".x", "x"),
+                             requiredInt(yaml, path + ".y", "y"),
+                             requiredInt(yaml, path + ".z", "z"),
                             yaml.getStringList(path + ".original-ground"),
                             GeneratedChestPlacement.State.valueOf(
                                     yaml.getString(path + ".state", "ACTIVE").toUpperCase(Locale.ROOT)));
@@ -83,6 +91,7 @@ public final class GeneratedChestRepository {
         placements.clear();
         placements.putAll(next);
         save();
+        revision++;
     }
 
     private void ensureWritable() {
@@ -122,5 +131,18 @@ public final class GeneratedChestRepository {
 
     private static String readable(Exception exception) {
         return exception.getMessage() == null ? exception.getClass().getSimpleName() : exception.getMessage();
+    }
+
+    private static int requiredInt(YamlConfiguration yaml, String path, String name) {
+        Object raw = yaml.get(path);
+        if (!(raw instanceof Number number)) {
+            throw new IllegalArgumentException("missing " + name + " coordinate");
+        }
+        double value = number.doubleValue();
+        if (!Double.isFinite(value) || value != Math.rint(value)
+                || value < Integer.MIN_VALUE || value > Integer.MAX_VALUE) {
+            throw new IllegalArgumentException("invalid " + name + " coordinate");
+        }
+        return (int) value;
     }
 }

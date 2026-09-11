@@ -19,6 +19,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.logging.Logger;
 import java.util.function.Consumer;
 
 import static org.mockito.ArgumentMatchers.contains;
@@ -41,6 +42,7 @@ class WeaponLootGuiManagerTest {
         when(repository.snapshot()).thenReturn(catalog(
                 new BlockPoint("arena", 0, 60, 0), new BlockPoint("arena", 10, 70, 10)));
         plugin = mock(InfectedPlugin.class);
+        when(plugin.getLogger()).thenReturn(mock(Logger.class));
         Server server = mock(Server.class);
         BukkitScheduler scheduler = mock(BukkitScheduler.class);
         bossBar = mock(BossBar.class);
@@ -51,6 +53,7 @@ class WeaponLootGuiManagerTest {
                 plugin, repository, chestService, generatedChestService,
                 mock(WeaponSelectionListener.class), ignored -> { }));
         player = mock(Player.class);
+        when(player.isOnline()).thenReturn(true);
         doNothing().when(manager).openWizard(any());
         doNothing().when(manager).openGuns(any(), anyInt());
         doNothing().when(manager).openGrenades(any(), anyInt());
@@ -71,12 +74,40 @@ class WeaponLootGuiManagerTest {
     void changedRegionCannotExecuteAStaleFillConfirmation() {
         WeaponMenuHolder confirmation = WeaponMenuHolder.confirmation(
                 WeaponMenuHolder.MenuType.CONFIRM_FILL,
-                "BlockPoint[world=arena, x=0, y=60, z=0]|BlockPoint[world=arena, x=5, y=70, z=5]");
+                "catalog=-1|layout=0");
 
         manager.handleClick(player, confirmation, 11, ClickType.LEFT);
 
         verifyNoInteractions(chestService);
-        verify(player).sendMessage(contains("region changed"));
+        verify(player).sendMessage(contains("configuration or generated layout changed"));
+        verify(manager).openWizard(player);
+    }
+
+    @Test
+    void changedWeaponCatalogCannotExecuteAStaleFillConfirmation() {
+        when(repository.revision()).thenReturn(8L);
+        when(generatedChestService.layoutRevision()).thenReturn(11L);
+        WeaponMenuHolder confirmation = WeaponMenuHolder.confirmation(
+                WeaponMenuHolder.MenuType.CONFIRM_FILL, "catalog=7|layout=11");
+
+        manager.handleClick(player, confirmation, 11, ClickType.LEFT);
+
+        verifyNoInteractions(chestService);
+        verify(player).sendMessage(contains("configuration or generated layout changed"));
+        verify(manager).openWizard(player);
+    }
+
+    @Test
+    void changedGeneratedLayoutCannotExecuteAStaleRemoveConfirmation() {
+        when(repository.revision()).thenReturn(7L);
+        when(generatedChestService.layoutRevision()).thenReturn(12L);
+        WeaponMenuHolder confirmation = WeaponMenuHolder.confirmation(
+                WeaponMenuHolder.MenuType.CONFIRM_REMOVE, "catalog=7|layout=11");
+
+        manager.handleClick(player, confirmation, 11, ClickType.LEFT);
+
+        verify(generatedChestService, never()).executeAsync(any(), any(), any(), any());
+        verify(player).sendMessage(contains("configuration or generated layout changed"));
         verify(manager).openWizard(player);
     }
 
@@ -126,7 +157,7 @@ class WeaponLootGuiManagerTest {
     void confirmedEmptyStartsAStreamedOperationAndReopensWizardAfterCompletion() {
         WeaponMenuHolder confirmation = WeaponMenuHolder.confirmation(
                 WeaponMenuHolder.MenuType.CONFIRM_CLEAR,
-                "BlockPoint[world=arena, x=0, y=60, z=0]|BlockPoint[world=arena, x=10, y=70, z=10]");
+                "catalog=0|layout=0");
         var completion = org.mockito.ArgumentCaptor.forClass(Consumer.class);
         var progress = org.mockito.ArgumentCaptor.forClass(Consumer.class);
 
@@ -152,7 +183,7 @@ class WeaponLootGuiManagerTest {
     void confirmedGenerateStartsTheIndependentLayoutOperation() {
         WeaponMenuHolder confirmation = WeaponMenuHolder.confirmation(
                 WeaponMenuHolder.MenuType.CONFIRM_GENERATE,
-                "BlockPoint[world=arena, x=0, y=60, z=0]|BlockPoint[world=arena, x=10, y=70, z=10]|generated=100");
+                "catalog=0|layout=0");
         var completion = org.mockito.ArgumentCaptor.forClass(Consumer.class);
         var progress = org.mockito.ArgumentCaptor.forClass(Consumer.class);
 
@@ -176,13 +207,51 @@ class WeaponLootGuiManagerTest {
     void changedGeneratedCountCannotExecuteAStaleGenerateConfirmation() {
         WeaponMenuHolder confirmation = WeaponMenuHolder.confirmation(
                 WeaponMenuHolder.MenuType.CONFIRM_GENERATE,
-                "BlockPoint[world=arena, x=0, y=60, z=0]|BlockPoint[world=arena, x=10, y=70, z=10]|generated=90");
+                "catalog=-1|layout=0");
 
         manager.handleClick(player, confirmation, 11, ClickType.LEFT);
 
-        verifyNoInteractions(generatedChestService);
-        verify(player).sendMessage(contains("count changed"));
+        verify(generatedChestService, never()).executeAsync(any(), any(), any(), any());
+        verify(player).sendMessage(contains("configuration or generated layout changed"));
         verify(manager).openWizard(player);
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void disconnectedAdminReceivesNoFillCompletionUi() {
+        WeaponMenuHolder confirmation = WeaponMenuHolder.confirmation(
+                WeaponMenuHolder.MenuType.CONFIRM_CLEAR, "catalog=0|layout=0");
+        var completion = org.mockito.ArgumentCaptor.forClass(Consumer.class);
+        manager.handleClick(player, confirmation, 11, ClickType.LEFT);
+        verify(chestService).executeAsync(any(), eq(WeaponChestService.ActionType.CLEAR),
+                any(), completion.capture());
+        clearInvocations(player, manager);
+        when(player.isOnline()).thenReturn(false);
+
+        completion.getValue().accept(new WeaponChestService.ActionResult(true, 3, List.of()));
+
+        verify(player, never()).sendMessage(anyString());
+        verify(manager, never()).openWizard(player);
+        verify(plugin.getLogger()).info(contains("completed after the administrator disconnected"));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void disconnectedAdminReceivesNoGeneratedCompletionUi() {
+        WeaponMenuHolder confirmation = WeaponMenuHolder.confirmation(
+                WeaponMenuHolder.MenuType.CONFIRM_GENERATE, "catalog=0|layout=0");
+        var completion = org.mockito.ArgumentCaptor.forClass(Consumer.class);
+        manager.handleClick(player, confirmation, 11, ClickType.LEFT);
+        verify(generatedChestService).executeAsync(any(), eq(GeneratedChestService.ActionType.GENERATE),
+                any(), completion.capture());
+        clearInvocations(player, manager);
+        when(player.isOnline()).thenReturn(false);
+
+        completion.getValue().accept(new GeneratedChestService.ActionResult(true, 100, List.of()));
+
+        verify(player, never()).sendMessage(anyString());
+        verify(manager, never()).openWizard(player);
+        verify(plugin.getLogger()).info(contains("completed after the administrator disconnected"));
     }
 
     private static WeaponLootCatalog catalog(BlockPoint point1, BlockPoint point2) {

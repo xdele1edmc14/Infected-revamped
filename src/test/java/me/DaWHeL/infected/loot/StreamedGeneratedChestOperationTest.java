@@ -9,6 +9,7 @@ import org.bukkit.block.Chest;
 import org.bukkit.block.data.BlockData;
 import org.bukkit.persistence.PersistentDataContainer;
 import org.bukkit.persistence.PersistentDataType;
+import org.bukkit.plugin.Plugin;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.mockito.InOrder;
@@ -79,6 +80,10 @@ class StreamedGeneratedChestOperationTest {
             loaded.set(true);
             return CompletableFuture.completedFuture(chunk);
         });
+        doAnswer(ignored -> {
+            loaded.set(false);
+            return true;
+        }).when(chunk).unload(anyBoolean());
         OutdoorChestSiteValidator validator = mock(OutdoorChestSiteValidator.class);
         ChestSite site = new ChestSite(5, 64, 5);
         when(validator.validate(any(), any(), anyInt(), anyInt())).thenAnswer(
@@ -93,9 +98,39 @@ class StreamedGeneratedChestOperationTest {
         }
 
         assertTrue(operation.result().success());
-        verify(fixture.world).getChunkAtAsync(0, 0, false);
+        verify(fixture.world, atLeast(2)).getChunkAtAsync(0, 0, false);
         verify(fixture.world, never()).getChunkAt(0, 0, false);
-        verify(chunk).unload(true);
+        verify(chunk, atLeastOnce()).unload(false);
+        verify(chunk, atLeastOnce()).unload(true);
+    }
+
+    @Test
+    void acceptedCandidateFootprintsAreReleasedBeforePlanningTheNextSite() {
+        GeneratedChestRepository repository = new GeneratedChestRepository(directory.toFile());
+        WorldFixture fixture = new WorldFixture();
+        Plugin plugin = mock(Plugin.class);
+        Chunk chunk = mock(Chunk.class);
+        when(fixture.world.isChunkLoaded(anyInt(), anyInt())).thenReturn(false);
+        when(fixture.world.isChunkGenerated(anyInt(), anyInt())).thenReturn(true);
+        when(fixture.world.getChunkAtAsync(anyInt(), anyInt(), eq(false)))
+                .thenReturn(CompletableFuture.completedFuture(chunk));
+        when(chunk.addPluginChunkTicket(plugin)).thenReturn(true);
+        OutdoorChestSiteValidator validator = mock(OutdoorChestSiteValidator.class);
+        when(validator.validate(any(), any(), anyInt(), anyInt())).thenAnswer(invocation ->
+                java.util.Optional.of(new ChestSite(invocation.getArgument(2), 64, invocation.getArgument(3))));
+        StreamedGeneratedChestOperation operation = new StreamedGeneratedChestOperation(
+                plugin, GeneratedChestService.ActionType.GENERATE, fixture.world,
+                new ChestRegion("arena", 0, 0, 0, 100, 100, 100), 2,
+                repository, validator, markerKey, ignored -> mock(BlockData.class),
+                ignored -> fixture.world, 12L, () -> true);
+
+        assertFalse(operation.step(1, 1));
+
+        verify(chunk, atLeastOnce()).removePluginChunkTicket(plugin);
+        verify(chunk, atLeastOnce()).unload(false);
+        operation.cancel("Plugin disabled.");
+
+        assertFalse(operation.result().success());
     }
 
     @Test
@@ -312,6 +347,10 @@ class StreamedGeneratedChestOperationTest {
             loaded.set(true);
             return CompletableFuture.completedFuture(chunk);
         });
+        doAnswer(ignored -> {
+            loaded.set(false);
+            return true;
+        }).when(chunk).unload(anyBoolean());
         when(fixture.block(5, 65, 5).getType()).thenReturn(Material.CHEST);
         when(fixture.data.get(markerKey, PersistentDataType.STRING)).thenReturn(id.toString());
         for (int dx = -1; dx <= 1; dx++) {
@@ -329,9 +368,10 @@ class StreamedGeneratedChestOperationTest {
         }
 
         assertTrue(operation.result().success());
-        verify(fixture.world).getChunkAtAsync(0, 0, false);
+        verify(fixture.world, atLeast(2)).getChunkAtAsync(0, 0, false);
         verify(fixture.block(5, 65, 5)).setType(Material.AIR, false);
-        verify(chunk).unload(true);
+        verify(chunk, atLeastOnce()).unload(false);
+        verify(chunk, atLeastOnce()).unload(true);
     }
 
     private final class WorldFixture {

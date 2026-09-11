@@ -37,7 +37,7 @@ public record DeathTitleMessages(
     public static DeathTitleMessages from(YamlConfiguration language) {
         return new DeathTitleMessages(
                 language.getString("infected-death.title", "&c&lYOU DIED"),
-                language.getString("infected-death.subtitle", "&7Respawning in 3 seconds..."),
+                language.getString("infected-death.subtitle", "&7Respawn to begin the 3-second cooldown..."),
                 language.getString("infected-death.out-of-lives-subtitle", "&4Your lives have run out!"),
                 language.getInt("infected-death.timings.fade-in", 10),
                 language.getInt("infected-death.timings.stay", 60),

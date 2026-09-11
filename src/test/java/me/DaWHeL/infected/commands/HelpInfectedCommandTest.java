@@ -23,5 +23,7 @@ class HelpInfectedCommandTest {
         assertTrue(messages.getAllValues().stream()
                 .noneMatch(message -> message.toLowerCase().contains("givefeather")
                         || message.toLowerCase().contains("jump feather")));
+        assertTrue(messages.getAllValues().stream()
+                .anyMatch(message -> message.contains("/infected compass <on|off|auto|status>")));
     }
 }

@@ -125,4 +125,57 @@ class GeneratedChestServiceTest {
         assertFalse(preview.success());
         assertTrue(preview.errors().stream().anyMatch(error -> error.contains("3x3")));
     }
+
+    @Test
+    void generatePreviewRejectsCatalogConfigurationErrors() {
+        GameManager game = mock(GameManager.class);
+        when(game.getPhase()).thenReturn(RoundPhase.LOBBY);
+        World world = mock(World.class);
+        WeaponLootCatalog catalog = new WeaponLootCatalog(
+                new BlockPoint("arena", 0, 0, 0), new BlockPoint("arena", 15, 100, 15),
+                new WeaponLootCatalog.Settings(10, 25, 5_000), List.of(), List.of(),
+                List.of("Invalid global loot settings: generated chest count is broken"));
+        GeneratedChestService service = new GeneratedChestService(
+                game, () -> catalog, new GeneratedChestRepository(directory.toFile()),
+                mock(OutdoorChestSiteValidator.class), new NamespacedKey("infected", "generated-weapon-chest"),
+                new ChestOperationGate(), name -> world, () -> 1L);
+
+        GeneratedChestService.ActionPreview preview = service.preview(GeneratedChestService.ActionType.GENERATE);
+
+        assertFalse(preview.success());
+        assertTrue(preview.errors().stream().anyMatch(error -> error.contains("Invalid global loot settings")));
+    }
+
+    @Test
+    void shutdownCancelsTheScheduledOperationAndReleasesTheSharedGate() {
+        GameManager game = mock(GameManager.class);
+        when(game.getPhase()).thenReturn(RoundPhase.LOBBY);
+        World world = mock(World.class);
+        when(world.getName()).thenReturn("arena");
+        WeaponLootCatalog catalog = new WeaponLootCatalog(
+                new BlockPoint("arena", 0, 0, 0), new BlockPoint("arena", 31, 100, 31),
+                new WeaponLootCatalog.Settings(10, 25, 5_000), List.of(), List.of(), List.of());
+        Plugin plugin = mock(Plugin.class);
+        Server server = mock(Server.class);
+        BukkitScheduler scheduler = mock(BukkitScheduler.class);
+        BukkitTask task = mock(BukkitTask.class);
+        when(plugin.getServer()).thenReturn(server);
+        when(server.getScheduler()).thenReturn(scheduler);
+        when(scheduler.runTaskTimer(eq(plugin), any(Runnable.class), eq(1L), eq(1L))).thenReturn(task);
+        ChestOperationGate gate = new ChestOperationGate();
+        GeneratedChestService service = new GeneratedChestService(
+                game, () -> catalog, new GeneratedChestRepository(directory.toFile()),
+                mock(OutdoorChestSiteValidator.class), new NamespacedKey("infected", "generated-weapon-chest"),
+                gate, name -> world, () -> 1L);
+        AtomicReference<GeneratedChestService.ActionResult> completed = new AtomicReference<>();
+
+        service.executeAsync(plugin, GeneratedChestService.ActionType.GENERATE, completed::set);
+        assertTrue(service.isOperationActive());
+        service.shutdown();
+
+        assertFalse(service.isOperationActive());
+        assertNotNull(completed.get());
+        assertFalse(completed.get().success());
+        verify(task).cancel();
+    }
 }

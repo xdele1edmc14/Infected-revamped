@@ -42,7 +42,8 @@ class ScoreboardTemplateTest {
     @Test
     void suppliesPersonalTeamLifeAndOutbreakPlaceholders() {
         ScoreboardTemplate.State state = new ScoreboardTemplate.State(
-                ParticipantRole.INFECTED, 4, 3, 2, 3, 12, 6);
+                ParticipantRole.INFECTED, 4, 3, 2, 3, 12, 6,
+                "Time Limit", "7:05");
 
         Map<String, String> placeholders = template.placeholders(state);
 
@@ -55,6 +56,8 @@ class ScoreboardTemplateTest {
         assertEquals("12", placeholders.get("survivors"));
         assertEquals("6", placeholders.get("infected"));
         assertEquals("BBBBRR", placeholders.get("outbreak_bar"));
+        assertEquals("Time Limit", placeholders.get("round_mode"));
+        assertEquals("7:05", placeholders.get("time_remaining"));
     }
 
     @Test
@@ -69,8 +72,21 @@ class ScoreboardTemplateTest {
     @Test
     void capsLifeHeartRenderingBeforeRepeatingConfiguredGlyphs() {
         ScoreboardTemplate.State state = new ScoreboardTemplate.State(
-                ParticipantRole.INFECTED, 0, 0, 1_000_000, 1_000_000, 1, 1);
+                ParticipantRole.INFECTED, 0, 0, 1_000_000, 1_000_000, 1, 1,
+                "Deathmatch", "No Limit");
 
         assertEquals(64, template.placeholders(state).get("lives_hearts").length());
+    }
+
+    @Test
+    void parsesAnImmutableSnapshotInsteadOfReadingYamlForEveryPlayer() {
+        config.set("scoreboard.layouts.survivor", List.of("changed"));
+        config.set("scoreboard.role-names.survivor", "Changed Role");
+        ScoreboardTemplate.State state = new ScoreboardTemplate.State(
+                ParticipantRole.SURVIVOR, 0, 0, 0, 3, 1, 0,
+                "Deathmatch", "No Limit");
+
+        assertEquals(List.of("survivor line", "{kills}"), template.lines(ParticipantRole.SURVIVOR));
+        assertEquals("The Survivor", template.placeholders(state).get("role"));
     }
 }

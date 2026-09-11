@@ -13,10 +13,16 @@ public class Reload implements CommandExecutor {
 
     private final InfectedPlugin plugin;
     private final GameManager gameManager;
+    private final Runnable runtimeRefresh;
 
     public Reload(InfectedPlugin plugin, GameManager gameManager) {
+        this(plugin, gameManager, () -> { });
+    }
+
+    public Reload(InfectedPlugin plugin, GameManager gameManager, Runnable runtimeRefresh) {
         this.plugin = plugin;
         this.gameManager = gameManager;
+        this.runtimeRefresh = runtimeRefresh;
     }
 
     @Override
@@ -28,6 +34,7 @@ public class Reload implements CommandExecutor {
         }
 
         plugin.reloadConfig();
+        runtimeRefresh.run();
 
         // Send feedback to the sender
         String msg = plugin.getConfig().getString("messages.config-reloaded",

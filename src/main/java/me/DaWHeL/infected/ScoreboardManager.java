@@ -15,6 +15,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 
@@ -26,6 +27,7 @@ public class ScoreboardManager {
     private final ScoreboardTextRenderer textRenderer = new ScoreboardTextRenderer();
     private final Map<UUID, PersonalBoard> boards = new HashMap<>();
     private final Set<UUID> playersOnMainBoard = new HashSet<>();
+    private CachedConfiguration cachedConfiguration;
 
     public ScoreboardManager(InfectedPlugin plugin, GameManager gameManager) {
         this.plugin = plugin;
@@ -43,15 +45,14 @@ public class ScoreboardManager {
     }
 
     public void applyScoreboard(Player player) {
-        FileConfiguration config = plugin.getConfig();
-        if (!config.getBoolean("scoreboard.enabled", true)) {
+        CachedConfiguration config = configuration();
+        if (!config.enabled()) {
             clearScoreboard(player);
             return;
         }
 
         playersOnMainBoard.remove(player.getUniqueId());
         ParticipantRole role = gameManager.roleOf(player);
-        ScoreboardTemplate template = new ScoreboardTemplate(config);
         ScoreboardTemplate.State state = new ScoreboardTemplate.State(
                 role,
                 gameManager.kills(player),
@@ -59,12 +60,14 @@ public class ScoreboardManager {
                 gameManager.remainingInfectedLives(player),
                 gameManager.configuredInfectedLives(),
                 gameManager.getSurvivors().size(),
-                gameManager.getInfected().size()
+                gameManager.getInfected().size(),
+                gameManager.roundModeDisplayName(),
+                gameManager.roundTimeDisplay()
         );
         ViewState viewState = new ViewState(
-                config.getString("scoreboard.title", ""),
-                List.copyOf(template.lines(role)),
-                template.placeholders(state)
+                config.title(),
+                config.template().lines(role),
+                config.template().placeholders(state)
         );
 
         PersonalBoard board = boards.get(player.getUniqueId());
@@ -88,6 +91,14 @@ public class ScoreboardManager {
         playersOnMainBoard.clear();
     }
 
+    public void reloadConfiguration() {
+        FileConfiguration config = Objects.requireNonNull(plugin.getConfig(), "plugin config");
+        cachedConfiguration = new CachedConfiguration(
+                config.getBoolean("scoreboard.enabled", true),
+                Objects.requireNonNullElse(config.getString("scoreboard.title", ""), ""),
+                new ScoreboardTemplate(config));
+    }
+
     public void forgetPlayer(Player player) {
         boards.remove(player.getUniqueId());
         playersOnMainBoard.remove(player.getUniqueId());
@@ -108,6 +119,13 @@ public class ScoreboardManager {
             entries[index] = entry;
         }
         return new PersonalBoard(scoreboard, objective, lines, entries);
+    }
+
+    private CachedConfiguration configuration() {
+        if (cachedConfiguration == null) {
+            reloadConfiguration();
+        }
+        return cachedConfiguration;
     }
 
     private final class PersonalBoard {
@@ -146,5 +164,8 @@ public class ScoreboardManager {
     }
 
     private record ViewState(String title, List<String> lines, Map<String, String> placeholders) {
+    }
+
+    private record CachedConfiguration(boolean enabled, String title, ScoreboardTemplate template) {
     }
 }

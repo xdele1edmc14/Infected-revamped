@@ -105,9 +105,9 @@ class CombatPolicyTest {
     }
 
     @Test
-    void doesNotInventRulesForNonParticipants() {
+    void blocksRemovedOrQueuedPlayersFromActiveRoundCombat() {
         assertAll(
-                () -> assertEquals(new Decision(false, false), policy.decide(
+                () -> assertEquals(new Decision(true, false), policy.decide(
                         RoundPhase.ACTIVE,
                         ParticipantRole.NONE,
                         ParticipantRole.SURVIVOR,
@@ -119,7 +119,7 @@ class CombatPolicyTest {
                         ParticipantRole.INFECTED,
                         false,
                         false)),
-                () -> assertEquals(new Decision(false, false), policy.decide(
+                () -> assertEquals(new Decision(true, false), policy.decide(
                         RoundPhase.ACTIVE,
                         ParticipantRole.INFECTED,
                         ParticipantRole.NONE,

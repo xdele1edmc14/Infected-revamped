@@ -1,10 +1,13 @@
 package me.DaWHeL.infected;
 
 import org.bukkit.Location;
+import org.bukkit.Material;
 import org.bukkit.World;
+import org.bukkit.WorldBorder;
 import org.bukkit.block.Block;
 import org.bukkit.entity.Player;
 import org.bukkit.scheduler.BukkitTask;
+import org.bukkit.util.BoundingBox;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -22,6 +25,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -88,7 +92,8 @@ class TeleportManagerTest {
 
     @Test
     void anEmptyPlayerQueueCompletesSuccessfullyWithoutScheduling() {
-        when(spawnRepository.loadedLocations(SpawnRole.SURVIVOR)).thenReturn(List.of(location(0, 64, 0)));
+        Location spawn = location(0.5, 64, 0.5);
+        when(spawnRepository.loadedLocations(SpawnRole.SURVIVOR)).thenReturn(List.of(spawn));
         AtomicReference<TeleportBatchResult> completion = new AtomicReference<>();
 
         BukkitTask scheduled = manager.teleportPlayersBatch(
@@ -101,7 +106,7 @@ class TeleportManagerTest {
 
     @Test
     void usesOnlyTheRequestedRoleAndReportsCancelledTeleports() {
-        Location release = location(20, 70, 30);
+        Location release = location(20.5, 70, 30.5);
         when(spawnRepository.loadedLocations(SpawnRole.INFECTED_RELEASE)).thenReturn(List.of(release));
         Player first = player(true);
         Player second = player(false);
@@ -118,9 +123,9 @@ class TeleportManagerTest {
         ArgumentCaptor<Location> firstDestination = ArgumentCaptor.forClass(Location.class);
         verify(first).teleport(firstDestination.capture());
         assertAll(
-                () -> assertEquals(18.5, firstDestination.getValue().getX()),
+                () -> assertEquals(20.5, firstDestination.getValue().getX()),
                 () -> assertEquals(70.0, firstDestination.getValue().getY()),
-                () -> assertEquals(28.5, firstDestination.getValue().getZ()),
+                () -> assertEquals(30.5, firstDestination.getValue().getZ()),
                 () -> assertEquals(2, completion.get().attempted()),
                 () -> assertEquals(1, completion.get().succeeded()),
                 () -> assertEquals(List.of(second.getUniqueId()), completion.get().failedPlayerIds()),
@@ -131,9 +136,57 @@ class TeleportManagerTest {
     }
 
     @Test
-    void skipsPlayersWhoAreNoLongerEligibleBeforeTheirBatchRuns() {
+    void teleportsToConfiguredLandingWithoutRecheckingBlocks() {
+        World world = mock(World.class);
+        Location configured = new Location(world, 20.5, 70, 30.5);
+        when(world.isChunkLoaded(anyInt(), anyInt())).thenReturn(false);
+        Player player = player(true);
+        AtomicReference<TeleportBatchResult> completion = new AtomicReference<>();
+
+        manager.teleportPlayersBatch(
+                SpawnRole.SURVIVOR,
+                List.of(configured),
+                List.of(player),
+                1,
+                0,
+                ignored -> true,
+                completion::set
+        );
+        ArgumentCaptor<Runnable> operation = ArgumentCaptor.forClass(Runnable.class);
+        verify(scheduler).runRepeating(operation.capture(),
+                org.mockito.ArgumentMatchers.eq(0L), org.mockito.ArgumentMatchers.eq(1L));
+
+        operation.getValue().run();
+
+        verify(player).teleport(configured);
+        verify(world, never()).getBlockAt(anyInt(), anyInt(), anyInt());
+        assertTrue(completion.get().success());
+    }
+
+    @Test
+    void rejectsQueuesThatExceedTheBoundedSpawnCapacity() {
+        Location spawn = location(0.5, 64, 0.5);
         when(spawnRepository.loadedLocations(SpawnRole.SURVIVOR))
-                .thenReturn(List.of(location(0, 64, 0)));
+                .thenReturn(List.of(spawn));
+        List<Player> players = java.util.stream.IntStream.range(0, 26)
+                .mapToObj(ignored -> player(true))
+                .toList();
+        AtomicReference<TeleportBatchResult> completion = new AtomicReference<>();
+
+        BukkitTask scheduled = manager.teleportPlayersBatch(
+                SpawnRole.SURVIVOR, players, 10, 5, completion::set);
+
+        assertNull(scheduled);
+        assertFalse(completion.get().success());
+        assertTrue(completion.get().error().contains("capacity"));
+        verify(scheduler, never()).runRepeating(org.mockito.ArgumentMatchers.any(), anyLong(), anyLong());
+    }
+
+    @Test
+    void skipsPlayersWhoAreNoLongerEligibleBeforeTheirBatchRuns() {
+        Location spawn = location(0.5, 64, 0.5);
+        when(spawnRepository.loadedLocations(SpawnRole.SURVIVOR))
+                .thenReturn(List.of(spawn));
         Player removed = player(true);
         AtomicReference<TeleportBatchResult> completion = new AtomicReference<>();
 
@@ -161,8 +214,9 @@ class TeleportManagerTest {
 
     @Test
     void scopesTeleportHooksToThePlayerWhoseBatchIsRunning() {
+        Location spawn = location(0.5, 64, 0.5);
         when(spawnRepository.loadedLocations(SpawnRole.INFECTED_RELEASE))
-                .thenReturn(List.of(location(0, 64, 0)));
+                .thenReturn(List.of(spawn));
         Player first = player(true);
         Player second = player(true);
         Set<Player> teleporting = new HashSet<>();
@@ -201,6 +255,29 @@ class TeleportManagerTest {
     }
 
     private static Location location(double x, double y, double z) {
-        return new Location(mock(World.class), x, y, z, 90, 5);
+        World world = mock(World.class);
+        WorldBorder border = mock(WorldBorder.class);
+        when(world.getWorldBorder()).thenReturn(border);
+        when(border.isInside(any(Location.class))).thenReturn(true);
+        when(world.getMinHeight()).thenReturn(-64);
+        when(world.getMaxHeight()).thenReturn(320);
+        when(world.isChunkLoaded(anyInt(), anyInt())).thenReturn(true);
+        when(world.getBlockAt(anyInt(), anyInt(), anyInt())).thenAnswer(invocation -> {
+            int blockX = invocation.getArgument(0);
+            int blockY = invocation.getArgument(1);
+            int blockZ = invocation.getArgument(2);
+            Block block = mock(Block.class);
+            if (blockY == Math.floor(y) - 1) {
+                when(block.getType()).thenReturn(Material.STONE);
+                when(block.isPassable()).thenReturn(false);
+                when(block.getBoundingBox()).thenReturn(new BoundingBox(
+                        blockX, blockY, blockZ, blockX + 1, blockY + 1, blockZ + 1));
+            } else {
+                when(block.getType()).thenReturn(Material.AIR);
+                when(block.isPassable()).thenReturn(true);
+            }
+            return block;
+        });
+        return new Location(world, x, y, z, 90, 5);
     }
 }

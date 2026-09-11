@@ -7,6 +7,7 @@ import org.bukkit.entity.EvokerFangs;
 import org.bukkit.entity.Player;
 import org.bukkit.entity.Projectile;
 import org.bukkit.entity.TNTPrimed;
+import org.bukkit.entity.Tameable;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.event.entity.EntityDamageEvent;
 import org.bukkit.projectiles.ProjectileSource;
@@ -61,6 +62,9 @@ public final class DamageAttackerResolver {
         }
         if (entity instanceof EvokerFangs fangs) {
             return resolveEntity(fangs.getOwner(), visited);
+        }
+        if (entity instanceof Tameable tameable && tameable.getOwner() instanceof Player owner) {
+            return Optional.of(owner);
         }
         return Optional.empty();
     }

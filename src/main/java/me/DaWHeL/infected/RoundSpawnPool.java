@@ -58,6 +58,12 @@ public final class RoundSpawnPool {
             for (Map.Entry<SpawnRole, Integer> teleportCount : teleportCounts.entrySet()) {
                 List<Location> platforms = byRole.getOrDefault(teleportCount.getKey(), List.of());
                 int count = Math.max(0, teleportCount.getValue());
+                long capacity = (long) platforms.size() * TeleportManager.MAX_PLAYERS_PER_SPAWN;
+                if (count > capacity) {
+                    throw new IllegalStateException(teleportCount.getKey().displayName()
+                            + " spawn capacity is " + capacity + " players, but " + count
+                            + " need a destination.");
+                }
                 for (int index = 0; index < count && !platforms.isEmpty(); index++) {
                     Location platform = platforms.get(index % platforms.size());
                     Location destination = TeleportManager.slotDestination(
@@ -95,12 +101,30 @@ public final class RoundSpawnPool {
 
         CompletableFuture<RoundSpawnPool> result = CompletableFuture
                 .allOf(loads.toArray(CompletableFuture[]::new))
-                .thenApply(ignored -> pool);
+                .thenApply(ignored -> {
+                    validateCapacity(pool, teleportCounts);
+                    return pool;
+                });
         return result.whenComplete((loaded, error) -> {
             if (error != null) {
                 pool.releaseTickets(plugin);
             }
         });
+    }
+
+    private static void validateCapacity(
+            RoundSpawnPool pool,
+            Map<SpawnRole, Integer> teleportCounts
+    ) {
+        for (SpawnRole role : SpawnRole.values()) {
+            List<Location> platforms = pool.locations(role);
+            int count = Math.max(0, teleportCounts.getOrDefault(role, 0));
+            long capacity = (long) platforms.size() * TeleportManager.MAX_PLAYERS_PER_SPAWN;
+            if (count > capacity) {
+                throw new IllegalStateException(role.displayName() + " spawn capacity is " + capacity
+                        + " players, but " + count + " need a destination.");
+            }
+        }
     }
 
     public Optional<Location> holdingSpawn() {
